@@ -6,6 +6,7 @@ from leah.utils.FileManager import FileManager
 from leah.config.GlobalConfig import GlobalConfig
 from leah.actions.webdriver_singleton import WebDriverSingleton  
 from selenium.webdriver.remote.webdriver import WebDriver
+from leah.utils.PostOffice import PostOffice
 
 class LocalConfigManager:
     def __init__(self, user_id: str, persona="default"):
@@ -104,3 +105,21 @@ class LocalConfigManager:
             FileManager: A FileManager instance configured for this user
         """
         return FileManager(self)
+
+    def get_post_office(self) -> PostOffice:
+        """
+        Get the singleton PostOffice instance.
+        
+        Returns:
+            PostOffice: The singleton PostOffice instance
+        """
+        return PostOffice.get_instance()
+        
+    def get_user_id(self) -> str:
+        """
+        Get the user ID associated with this LocalConfigManager instance.
+        
+        Returns:
+            str: The user ID
+        """
+        return self.user_id

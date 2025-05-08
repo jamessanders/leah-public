@@ -156,3 +156,13 @@ class GlobalConfig:
             if config.get('agent_description', None):
                 agent_descriptions[persona] = config['agent_description']
         return agent_descriptions
+    
+    def get_personas(self) -> dict[str, Any]:
+        """Get the configuration for all personas."""
+        return self.config['personas']
+    
+    def get_persona_config(self, persona='default') -> dict[str, Any]:
+        """Get the configuration for a persona."""
+        return self._get_persona_config(persona)
+    
+    

@@ -1,6 +1,6 @@
 from typing import List, Dict, Any
 from leah.llm.ChatApp import ChatApp
-from leah.actions import LinkAction, LogAction, NotesAction, TimeAction, WeatherAction, ImageGen, FileReadAction, FileWriteAction, AgentAction, ProcessAction, TavilyAction  
+from leah.actions import LinkAction, LogAction, NotesAction, TimeAction, WeatherAction, ImageGen, FileReadAction, FileWriteAction, AgentAction, ProcessAction, TavilyAction, EmailAction  
 import json
 
 class Actions:

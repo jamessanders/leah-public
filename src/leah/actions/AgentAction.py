@@ -3,6 +3,8 @@ from leah.llm.ChatApp import ChatApp
 from leah.actions.IActions import IAction
 import time
 
+from leah.utils.PostOffice import PostOffice
+
 class AgentAction(IAction):
     def __init__(self, config_manager, persona: str, query: str, chat_app: ChatApp):
         self.config_manager = config_manager
@@ -23,8 +25,6 @@ class AgentAction(IAction):
         ]
 
     def _ask_agent(self, query: str, conversation_history: List[Dict[str, Any]], agent_chatapp: ChatApp):
-
-        yield ("system", f"{self.persona} asked agent {agent_chatapp.persona}: {query}")
         
         time.sleep(0.5)
         
@@ -48,7 +48,30 @@ class AgentAction(IAction):
         if not query:
             yield ("end", "Query is required")
             return
-        yield from self._ask_agent(query, [], agent_chatapp)
+        if "@" in agent:
+            agent = agent.split("@")[0]
+
+        return_inbox_id = self.persona+"_agent_"+agent+"_"+self.chat_app.conversation_id + "_" + str(time.time())
+
+        yield ("system", f"{self.persona} asked agent {agent_chatapp.persona}: {query}")
+
+        to_inbox_id = agent + "@agents"
+        post_office = PostOffice.get_instance()
+        if post_office.has_inbox(to_inbox_id):
+            if post_office.has_inbox(return_inbox_id):
+                yield ("system", "Agent " + agent + " is already running, waiting for it to finish...")
+                yield ("inbox", return_inbox_id)
+                return
+            yield ("system", "Going into background")
+            post_office.create_inbox(return_inbox_id)
+            post_office.send_message(
+                to_inbox_id=to_inbox_id,
+                return_inbox_id=return_inbox_id,
+                body=(query, agent_chatapp, "AgentAction.ask_agent with agent named '" + agent + "'")
+            )
+            yield ("inbox", return_inbox_id)
+        else:
+            yield from self._ask_agent(query, [], agent_chatapp)
 
     def additional_notes(self) -> str:
         output = "The following is a description of the agents you can query: \n\n"
@@ -57,7 +80,11 @@ class AgentAction(IAction):
                 output += f"    - {persona}: {description}\n"
         return output + """
      
-    Important: Agents are not aware of any conversations you have had with the user or other agents so you must communicate all the details to them in detail.  Do not assume agents have any knowledge of the user or other agents.
+    Important information regarding agents: 
+    
+        - Agents are not aware of any conversations you have had with the user or other agents so you must communicate all the details to them in detail.  
+        - Do not assume agents have any knowledge of the user or other agents.  
+        - You can call multiple agents and they will all work in parallel, this is encouraged.
 
 """
     

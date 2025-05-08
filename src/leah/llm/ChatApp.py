@@ -1,3 +1,4 @@
+import time
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_google_genai import ChatGoogleGenerativeAI
@@ -20,6 +21,8 @@ from langchain_core.language_models.llms import BaseLLM
 import tiktoken
 from langchain_openai import ChatOpenAI
 from langchain_ollama import ChatOllama
+
+from leah.utils.PostOffice import PostOffice
 
 def count_tokens(text: str) -> int:
     """Calculate num tokens for OpenAI with tiktoken package."""
@@ -63,6 +66,13 @@ class ChatApp:
                 temperature=temperature,
                 openai_api_key=api_key
             )
+        elif connector_type == 'lmstudio':
+            self.llm = ChatOpenAI(
+                model=model,
+                temperature=temperature,
+                openai_api_key=api_key,
+                base_url=base_url
+            )
         else:  # local connector for Ollama/LMStudio
             self.llm = ChatOllama(
                 model=model,
@@ -79,6 +89,64 @@ class ChatApp:
             allow_partial=False,
             start_on="human",
         )
+
+    def get_watch_status(self):
+        # Get all watched inboxes for this conversation
+        watched_inboxes = self.conversation_store.get_watched_inboxes(self.conversation_id)
+        
+        post_office = PostOffice.get_instance()
+        
+        for inbox_id in watched_inboxes:
+            if not post_office.has_inbox(inbox_id):
+                self.conversation_store.remove_watched_inbox(self.conversation_id, inbox_id)
+                continue
+            if post_office.is_inbox_closed(inbox_id) and not post_office.has_messages(inbox_id):
+                post_office.delete_inbox(inbox_id)
+                self.conversation_store.remove_watched_inbox(self.conversation_id, inbox_id)
+                continue
+        
+        watched_inboxes = self.conversation_store.get_watched_inboxes(self.conversation_id)
+        
+        # Count statistics
+        total_inboxes = len(watched_inboxes)
+        open_inboxes = 0
+        closed_inboxes = 0
+
+        for inbox_id in watched_inboxes:
+            if post_office.has_inbox(inbox_id):
+                if post_office.is_inbox_closed(inbox_id):
+                    closed_inboxes += 1
+                else:
+                    open_inboxes += 1
+            else:
+                self.conversation_store.remove_watched_inbox(self.conversation_id, inbox_id)
+                total_inboxes -= 1
+                
+        return {
+            "total_inboxes": total_inboxes,
+            "open_inboxes": open_inboxes,
+            "closed_inboxes": closed_inboxes
+        }
+
+    def is_watching(self):
+        watch_status = self.get_watch_status()
+        return watch_status["total_inboxes"] > 0
+
+    def watch(self, timeout=10):
+        print("Watching...")
+        if not self.is_watching():
+            return
+        inboxs = list(self.conversation_store.get_watched_inboxes(self.conversation_id))
+        postoffice = PostOffice.get_instance()
+        timeout = timeout/len(inboxs)
+        for inbox in inboxs:
+            for message in postoffice.stream_messages_till_closed_or_timeout(inbox, timeout):
+                type, content, source = message.body
+                yield (type, content, source)
+            if postoffice.is_inbox_closed(inbox) and not postoffice.has_messages(inbox):
+                inboxs.remove(inbox)
+                postoffice.delete_inbox(inbox)
+            
 
     def load_conversation_with_id(self, conversation_id):
         self.conversation_id = conversation_id
@@ -112,10 +180,12 @@ class ChatApp:
                 parsed_response = json.loads(tool.strip())
                 tool_name = parsed_response.get("action", "")
                 tool_arguments = parsed_response.get("arguments", "{}")
+                print("Tool name: " + tool_name)
+                print("Tool arguments: " + str(tool_arguments))
             except Exception as e:
                 error_message = f"An error occurred: {str(e)}\n"
                 error_message += traceback.format_exc()
-                yield ("system", 'Invalid tool call')
+                yield ("system", self.persona + ': Invalid tool call')
                 yield ("tool_response", "That is not a valid tool call syntax.")
                 return
             if isinstance(tool_arguments, str):
@@ -123,9 +193,8 @@ class ChatApp:
                     tool_arguments = json.loads(tool_arguments)
                 except:
                     tool_arguments = {}
-            print("Tool arguments: " + str(tool_arguments))
             if (not tool_name):
-                yield ("system", 'Invalid tool call')
+                yield ("system", self.persona + ': Invalid tool call')
                 yield ("tool_response", "That is not a valid tool call.")
                 return 
             self.config_manager.get_log_manager().log("tool", tool_name + " " + str(tool_arguments))
@@ -187,7 +256,7 @@ class ChatApp:
                 full_content += message
         return full_content
     
-    def stream(self, user_input, use_tools=True, depth=0):
+    def stream(self, user_input, use_tools=True, depth=0, wait_timeout=1, check_inboxes=True):
         """
         Process user input and return chatbot response
         """
@@ -215,6 +284,15 @@ class ChatApp:
         
         # yield ("system", "Total tokens: " + str(total_tokens))
         
+        if check_inboxes and self.is_watching():
+            for type,body,source in self.watch(wait_timeout):
+                if type == "content":
+                    print("Content: " + str(body))
+                    yield ("system", self.persona + ": Found a new message from " + source + " before the query...")
+                    user_input = "System said: Appears to be a response from " + source + " to the previous query:\n\n" + body + "\n\nNote that the user has not read the response message and it may not be relevant to the current query.\nCurrent query: " + user_input
+                else:
+                    yield (type, body)
+                
         self.history.append(HumanMessage(user_input))
         
         history = [x for x in self.history if x.type != "system"]
@@ -252,6 +330,8 @@ class ChatApp:
         
         yield ("break","")
 
+        inboxs = []
+
         if use_tools:
             responses = []
             for tool in tool_stream_processor.matches:
@@ -261,8 +341,19 @@ class ChatApp:
                     elif type == "end":
                         if message:
                             yield from self.stream("That tool returned the following result (tell the user): " + message, use_tools=False)
+                    elif type == "inbox":
+                        inboxs.append(message)
                     else:
                         yield (type, message)
+        
+            if len(inboxs) > 0:
+                for inbox in inboxs:
+                    self.conversation_store.add_watched_inbox(self.conversation_id, inbox)
+
+                if self.is_watching():
+                    responses.append("System said: You have not received a response from all the agents yet, please check back in a few moments.\n\n")
+
             if responses:
-                yield from self.stream("\n\n".join(responses), depth=depth+1)
+                yield from self.stream("\n\n".join(responses), depth=depth+1, wait_timeout=wait_timeout)
+            
             

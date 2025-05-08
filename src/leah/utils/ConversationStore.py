@@ -1,6 +1,7 @@
 import os
 import pickle
-from typing import List, Dict, Any, Optional
+import json
+from typing import List, Dict, Any, Optional, Set
 from leah.utils.FileManager import FileManager
 
 class ConversationStore:
@@ -68,4 +69,82 @@ class ConversationStore:
         safe_id = conversation_id.replace('/', '_').replace('\\', '_')
         filename = f"conversations/{safe_id}/data.pickle"
         
-        return self.file_manager.delete_file(filename) 
+        return self.file_manager.delete_file(filename)
+
+    def add_watched_inbox(self, conversation_id: str, inbox_path: str) -> None:
+        """
+        Add an inbox path to the list of watched inboxes for a conversation.
+        
+        Args:
+            conversation_id (str): Unique identifier for the conversation
+            inbox_path (str): Path to the inbox to watch
+        """
+        safe_id = conversation_id.replace('/', '_').replace('\\', '_')
+        filename = f"conversations/{safe_id}/watching.json"
+        
+        # Load existing watched inboxes
+        watched_inboxes = set()
+        data = self.file_manager.get_file(filename)
+        if data is not None:
+            try:
+                watched_inboxes = set(json.loads(data.decode()))
+            except json.JSONDecodeError:
+                pass
+        
+        # Add new inbox and save
+        watched_inboxes.add(inbox_path)
+        self.file_manager.put_file(filename, json.dumps(list(watched_inboxes)).encode())
+        
+    def remove_watched_inbox(self, conversation_id: str, inbox_path: str) -> bool:
+        """
+        Remove an inbox path from the list of watched inboxes for a conversation.
+        
+        Args:
+            conversation_id (str): Unique identifier for the conversation
+            inbox_path (str): Path to the inbox to stop watching
+            
+        Returns:
+            bool: True if the inbox was removed, False if it wasn't being watched
+        """
+        safe_id = conversation_id.replace('/', '_').replace('\\', '_')
+        filename = f"conversations/{safe_id}/watching.json"
+        
+        # Load existing watched inboxes
+        watched_inboxes = set()
+        data = self.file_manager.get_file(filename)
+        if data is not None:
+            try:
+                watched_inboxes = set(json.loads(data.decode()))
+            except json.JSONDecodeError:
+                return False
+        
+        # Remove inbox if present
+        if inbox_path not in watched_inboxes:
+            return False
+            
+        watched_inboxes.remove(inbox_path)
+        self.file_manager.put_file(filename, json.dumps(list(watched_inboxes)).encode())
+        return True
+        
+    def get_watched_inboxes(self, conversation_id: str) -> Set[str]:
+        """
+        Get the set of watched inboxes for a conversation.
+        
+        Args:
+            conversation_id (str): Unique identifier for the conversation
+            
+        Returns:
+            Set[str]: Set of inbox paths being watched
+        """
+        if not conversation_id:
+            return set()
+        safe_id = conversation_id.replace('/', '_').replace('\\', '_')
+        filename = f"conversations/{safe_id}/watching.json"
+        # Load existing watched inboxes
+        data = self.file_manager.get_file(filename)
+        if data is not None:
+            try:
+                return set(json.loads(data.decode()))
+            except json.JSONDecodeError:
+                return set()
+        return set() 

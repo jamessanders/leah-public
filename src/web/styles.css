@@ -1,3 +1,58 @@
+:root {
+    /* Base theme colors */
+    --color-bg-primary: #111827;
+    --color-bg-secondary: #1f2937;
+    --color-bg-tertiary: #374151;
+    --color-bg-quaternary: #4b5563;
+    --color-bg-hover: #6b7280;
+    
+    /* Text colors */
+    --color-text-primary: #f3f4f6;
+    --color-text-secondary: #e5e7eb;
+    --color-text-muted: #9ca3af;
+    
+    /* Border colors */
+    --color-border-primary: #4b5563;
+    
+    /* Interactive element colors */
+    --color-button-primary: #007bff;
+    --color-button-primary-hover: #0056b3;
+    --color-button-danger: #dc3545;
+    --color-button-danger-hover: #c82333;
+    
+    /* Link colors */
+    --color-link: #60a5fa;
+    --color-link-hover: #3b82f6;
+    
+    /* Shadow colors */
+    --color-shadow: rgba(75, 85, 99, 0.2);
+    --color-shadow-heavy: rgba(0, 0, 0, 0.25);
+}
+
+/* Light theme */
+body.light-theme {
+    /* Base theme colors */
+    --color-bg-primary: #ffffff;
+    --color-bg-secondary: #f3f4f6;
+    --color-bg-tertiary: #e5e7eb;
+    --color-bg-quaternary: #d1d5db;
+    --color-bg-hover: #9ca3af;
+    
+    /* Text colors */
+    --color-text-primary: #111827;
+    --color-text-secondary: #1f2937;
+    --color-text-muted: #6b7280;
+    
+    /* Border colors */
+    --color-border-primary: #d1d5db;
+    
+    /* Interactive element colors remain the same for consistency */
+    
+    /* Shadow colors */
+    --color-shadow: rgba(0, 0, 0, 0.1);
+    --color-shadow-heavy: rgba(0, 0, 0, 0.2);
+}
+
 body {
     font-family: Arial, sans-serif;
     margin: 0;
@@ -5,8 +60,8 @@ body {
     display: flex;
     flex-direction: column;
     height: 100vh;
-    background-color: #111827;
-    color: #f3f4f6;
+    background-color: var(--color-bg-primary);
+    color: var(--color-text-primary);
     touch-action: manipulation; /* Prevents default touch behaviors like dragging */
     -webkit-touch-callout: none; /* Prevents callout to copy image on iOS */
     -webkit-tap-highlight-color: transparent; /* Removes tap highlight on iOS */
@@ -47,11 +102,11 @@ body {
     position: fixed;
     bottom: 0;
     left: 0;
-    border: 2px solid #4b5563;
+    border: 2px solid var(--color-border-primary);
     outline: none;
     font-size: 16px;
-    background-color: #1f2937;
-    color: #f3f4f6;
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-primary);
     z-index: 10;
     max-width: 100%;
 }
@@ -64,30 +119,30 @@ p {
     margin: 0;
 }
 .responseBox {
-    background-color: #374151;
+    background-color: var(--color-bg-tertiary);
     border-radius: 10px 15px;
     padding: 15px;
     margin: 10px;
     max-width: 60%;
     word-wrap: break-word;
     align-self: flex-start;
-    color: #f3f4f6;
+    color: var(--color-text-primary);
     font-size: 16px;
     line-height: 1.5;
-    box-shadow: 0 0 10px rgba(75, 85, 99, 0.2);
+    box-shadow: 0 0 10px var(--color-shadow);
     animation: fadeIn 0.3s ease-out forwards;
 }
 
 .userInputBox {
-    background-color: #6b7280;
+    background-color: var(--color-bg-hover);
     border-radius: 15px;
     padding: 15px;
     margin: 10px;
     max-width: 60%;
     word-wrap: break-word;
     align-self: flex-start;
-    color: #e5e7eb;
-    box-shadow: 0 0 10px rgba(75, 85, 99, 0.2);
+    color: var(--color-text-secondary);
+    box-shadow: 0 0 10px var(--color-shadow);
     animation: userMessageFade 0.5s ease-out forwards;
 }
 
@@ -95,25 +150,27 @@ p {
     flex-grow: 1;
     padding: 20px;
     overflow-y: auto;
-    background-color: #111827;
+    background-color: var(--color-bg-primary);
     box-shadow: 0 0 20px rgba(75, 85, 99, 0.1);
     display: flex;
     flex-direction: column;
     height: calc(100vh - 92px); /* Adjusted to account for header */
-    padding-bottom: 70px;
+    padding-bottom: 100px; /* Increased from 70px */
     width: 100%;
     max-width: 100%;
     box-sizing: border-box;
     margin-top: 50px; /* Add margin to account for fixed header */
+    -ms-overflow-style: none;  /* Hide scrollbar for IE and Edge */
+    scrollbar-width: none;  /* Hide scrollbar for Firefox */
 }
 
 .responseArea::-webkit-scrollbar {
-    display: none;
+    display: none;  /* Hide scrollbar for Chrome, Safari and Opera */
 }
 
 .loadingMessage {
     font-style: italic;
-    color: #9ca3af;
+    color: var(--color-text-muted);
     margin: 10px;
     animation: thinking 1.5s infinite;
     text-shadow: 0 0 5px rgba(156, 163, 175, 0.3);
@@ -123,8 +180,8 @@ p {
 .dropdown-button {
     cursor: pointer;
     padding: 7px;
-    background-color: rgb(0, 123, 255);
-    color: white;
+    background-color: var(--color-button-primary);
+    color: var(--color-text-primary);
     border-radius: 5px;
     margin-left: 10px;
 }
@@ -139,10 +196,10 @@ p {
     top: 0;
     right: 0;
     min-width: 15%;
-    background:#060e1e;
+    background: var(--color-bg-primary);
     height: 100%;
     padding: 10px;
-  box-shadow: -5px 0 10px rgba(0, 0, 0, 0.25);
+  box-shadow: -5px 0 10px var(--color-shadow-heavy);
   }
 .dropdown-menu.hidden {
     right: -35%;
@@ -184,8 +241,8 @@ p {
     height: 48px;
     border-radius: 50%;
     object-fit: cover;
-    border: 3px solid #6b7280;
-    box-shadow: 0 0 15px rgba(107, 114, 128, 0.3);
+    border: 3px solid var(--color-bg-hover);
+    box-shadow: 0 0 15px var(--color-shadow);
 }
 
 .content {
@@ -205,15 +262,18 @@ p {
 /* Media queries for responsive design */
 @media (max-width: 768px) {
     .responseBox, .userInputBox {
-        max-width: 85%;
+        max-width: calc(100% - 10px);
+        margin-left: 5px;
+        margin-right: 5px;
         box-sizing: border-box;
     }
     
     .responseArea {
         padding: 15px;
+        padding-bottom: 10px;
         width: 100%;
         overflow-y: auto;
-        -webkit-overflow-scrolling: touch; /* Smooth scrolling on iOS */
+        -webkit-overflow-scrolling: touch;
         box-sizing: border-box;
     }
     
@@ -258,7 +318,9 @@ p {
 /* For very small screens */
 @media (max-width: 480px) {
     .responseBox, .userInputBox {
-        max-width: 90%;
+        max-width: calc(100% - 10px);
+        margin-left: 5px;
+        margin-right: 5px;
         box-sizing: border-box;
     }
     
@@ -298,12 +360,11 @@ p {
 }
 
 .header {
-    background-color: #1f2937;
+    background-color: var(--color-bg-secondary);
     padding: 8px;
     display: flex;
     justify-content: flex-end;
     align-items: center;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     position: fixed;
     top: 0;
     left: 0;
@@ -312,15 +373,15 @@ p {
 }
 
 .header h1 {
-    color: #f3f4f6;
+    color: var(--color-text-primary);
     margin: 0;
     font-size: 1.5rem;
 }
 
 .personaSelector {
-    background-color: #374151;
-    color: #f3f4f6;
-    border: 1px solid #4b5563;
+    background-color: var(--color-bg-tertiary);
+    color: var(--color-text-primary);
+    border: 1px solid var(--color-border-primary);
     padding: 0.5rem;
     border-radius: 0.375rem;
     font-size: 0.875rem;
@@ -329,31 +390,31 @@ p {
 }
 
 .personaSelector:focus {
-    border-color: #60a5fa;
+    border-color: var(--color-link);
     box-shadow: 0 0 0 2px rgba(96, 165, 250, 0.2);
 }
 
 .personaSelector option {
-    background-color: #1f2937;
-    color: #f3f4f6;
+    background-color: var(--color-bg-secondary);
+    color: var(--color-text-primary);
 }
 
 a {
-    color: #60a5fa; /* A contrasting color for links */
+    color: var(--color-link);
     text-decoration: underline; /* Underline links to make them stand out */
     font-weight: bold; /* Make links bold */
 }
 
 /* Optional: Add hover effect for links */
 a:hover {
-    color: #3b82f6; /* Slightly darker color on hover */
+    color: var(--color-link-hover);
 }
 
 .open-modal {
     cursor: pointer;
     padding: 10px;
-    background-color: #007bff;
-    color: #fff;
+    background-color: var(--color-button-primary);
+    color: var(--color-text-primary);
     border-radius: 5px;
     display: inline-block;
     text-align: center;
@@ -364,7 +425,7 @@ a:hover {
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
-    background-color: #fff;
+    background-color: var(--color-bg-secondary);
     padding: 20px;
     border-radius: 10px;
     box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
@@ -387,8 +448,8 @@ a:hover {
 
 .modal button {
     padding: 10px 20px;
-    background-color: #007bff;
-    color: #fff;
+    background-color: var(--color-button-primary);
+    color: var(--color-text-primary);
     border: none;
     border-radius: 5px;
     cursor: pointer;
@@ -397,7 +458,7 @@ a:hover {
 }
 
 .modal button:hover {
-    background-color: #0056b3;
+    background-color: var(--color-button-primary-hover);
 }
 
 /* Login Panel Styles */
@@ -453,8 +514,8 @@ a:hover {
 
 .login-button {
     padding: 12px;
-    background-color: #007BFF;
-    color: white;
+    background-color: var(--color-button-primary);
+    color: var(--color-text-primary);
     border: none;
     border-radius: 4px;
     cursor: pointer;
@@ -464,11 +525,11 @@ a:hover {
 }
 
 .login-button:hover {
-    background-color: #0069d9;
+    background-color: var(--color-button-primary-hover);
 }
 
 .login-button:disabled {
-    background-color: #6c757d;
+    background-color: var(--color-bg-quaternary);
     cursor: not-allowed;
 }
 
@@ -478,15 +539,15 @@ a:hover {
     padding: 10px 20px;
     font-size: 16px;
     cursor: pointer;
-    background-color: #dc3545;
-    color: white;
+    background-color: var(--color-button-danger);
+    color: var(--color-text-primary);
     border: none;
     border-radius: 5px;
     transition: background-color 0.2s;
 }
 
 .logout-button:hover {
-    background-color: #c82333;
+    background-color: var(--color-button-danger-hover);
 }
 
 
@@ -513,6 +574,78 @@ margin: 0px 10px;
 
 .loading-spinner-circle {
     stroke: #9ca3af;
+    stroke-linecap: round;
+    animation: dash 1.5s ease-in-out infinite;
+}
+
+@keyframes rotate {
+    100% {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes dash {
+    0% {
+        stroke-dasharray: 1, 150;
+        stroke-dashoffset: 0;
+    }
+    50% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -35;
+    }
+    100% {
+        stroke-dasharray: 90, 150;
+        stroke-dashoffset: -124;
+    }
+}
+
+.notification-bubble {
+    position: fixed;
+    top: 60px;
+    right: 20px;
+    color: white;
+    padding: 8px 12px;
+    border-radius: 20px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    z-index: 1000;
+    opacity: 0;
+    transform: translateY(-20px);
+    transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+    pointer-events: none;
+    background-color: rgba(0, 0, 0, 0.7);
+}
+
+.notification-bubble.visible {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+}
+
+.notification-bubble.with-updates {
+    background-color: rgba(0, 128, 0, 0.8); /* Green background for updates */
+}
+
+.notification-bubble.with-tasks {
+    background-color: rgba(0, 0, 0, 0.7); /* Dark background for tasks */
+}
+
+.notification-content {
+    display: flex;
+    align-items: center;
+}
+
+.loading-spinner {
+    width: 20px;
+    height: 20px;
+    margin-right: 8px;
+    animation: rotate 2s linear infinite;
+}
+
+.loading-spinner-circle {
+    stroke: currentColor;
     stroke-linecap: round;
     animation: dash 1.5s ease-in-out infinite;
 }

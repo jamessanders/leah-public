@@ -11,6 +11,7 @@ from leah.utils.LogItem import LogItem, LogCollection
 from leah.utils.LogManager import LogManager
 from leah.utils.NotesManager import NotesManager
 from leah.llm.StreamProcessor import StreamProcessor
+from leah.utils.PostOffice import MailMan, PrintMessageHandler, PostOffice, Message, MessageHandler
 from urllib.parse import urlparse
 import asyncio
 import edge_tts
@@ -37,6 +38,133 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
 
 # Initialize mimetypes
 mimetypes.init()
+
+ # Initialize PostOffice singleton and system inbox
+post_office = PostOffice.get_instance()    
+
+class AgentMessageHandler(MessageHandler):
+    def handle_message(self, message: Message) -> None:
+        """Handle incoming messages by starting a ChatApp."""
+        try:
+            # Use the existing ChatApp from the message
+            print(" +++ Processing message for inbox " + message.return_inbox_id)
+            query, chatapp, source = message.body
+            response = ""
+            
+            # Get all watch inboxes for this conversation
+            post_office = PostOffice.get_instance()
+            
+            print(" +++ Query: " + query)
+            for type, content in chatapp.stream(query, wait_timeout=1):
+                if type == "content":
+                    response += content
+                elif type == "break":
+                    response += "\n\n"
+                elif type == "system":
+                    print("Sending system message to inbox " + message.return_inbox_id)
+                    # Send to original inbox
+                    post_office.send_message(
+                        to_inbox_id=message.return_inbox_id,
+                        return_inbox_id=None,
+                        body=(type, content, source)
+                    )
+            if chatapp.is_watching():
+                print(" +++ Sending continue message to inbox " + message.return_inbox_id)
+                post_office.send_message(
+                    to_inbox_id="@continue",
+                    return_inbox_id=message.return_inbox_id,
+                    body=(chatapp, response)
+                )
+            else:
+                print(" +++ No need to wait for continue message, sending final response to inbox " + message.return_inbox_id)
+                # Send final response to original inbox
+                post_office.send_message(
+                    to_inbox_id=message.return_inbox_id,
+                    return_inbox_id=None,
+                    body=("content", response, "")
+                )
+                post_office.close_inbox(message.return_inbox_id)
+
+        except Exception as e:
+                    print(f"Error in ChatMessageHandler: {str(e)}")
+                    print(traceback.format_exc())
+
+class ContinueMessageHandler(MessageHandler):
+    def handle_message(self, message: Message) -> None:
+        chatapp, response = message.body
+        return_inbox = message.return_inbox_id
+
+        print(" +++ Continue message receiving...")
+
+        if chatapp.is_watching():
+            for (type,content,source) in chatapp.watch(5):
+                if type == "content":
+                    response += content
+                elif type == "break":
+                    response += "\n\n"
+                elif type == "system":
+                    post_office.send_message(
+                        to_inbox_id=return_inbox,
+                        return_inbox_id=None,
+                        body=(type, content, source)
+                    )
+        if chatapp.is_watching():
+            print(" +++ Still waiting sending continue message to inbox AGAIN " + return_inbox)
+            post_office.send_message(
+                to_inbox_id="@continue",
+                return_inbox_id=return_inbox,
+                body=(chatapp, response)
+            )
+        else:
+            # Send final response to original inbox
+            print(" +++ Done with continuation thread sending final response to inbox " + return_inbox)
+            post_office.send_message(
+                to_inbox_id=return_inbox,
+                return_inbox_id=None,
+                body=("content", response, "")
+            )
+            post_office.close_inbox(message.return_inbox_id)
+                
+        
+
+# Initialize messaging system
+def initialize_agents():
+    print(" +++ Initializing agents")
+    config = GlobalConfig()
+    watched_inboxes = []
+    for persona in config.get_personas():
+        if config.get_persona_config(persona).get("threaded"):
+            boxId = persona + "@agents"
+            watched_inboxes.append(boxId)
+            post_office.create_inbox(boxId)
+
+    mail_man = MailMan(
+        post_office=post_office,
+        watched_inboxes=watched_inboxes,
+        message_handler=AgentMessageHandler(),
+        check_interval=0.5  # Check every 0.5 seconds
+    )
+    mail_man.start()  # Start the MailMan's internal operations
+
+# Start messaging system initialization in a separate thread
+messaging_thread = threading.Thread(target=initialize_agents, daemon=True)
+messaging_thread.start()
+
+def initialize_continue_messaging():
+    print(" +++ Initializing continue messaging")
+    post_office = PostOffice.get_instance()
+    post_office.create_inbox("@continue")
+    mail_man = MailMan(
+        post_office=post_office,
+        watched_inboxes=["@continue"],
+        message_handler=ContinueMessageHandler(),
+        check_interval=0.5  # Check every 0.5 seconds
+    )
+    mail_man.start()  # Start the MailMan's internal operations
+
+# Start messaging system initialization in a separate thread
+continue_messaging_thread = threading.Thread(target=initialize_continue_messaging, daemon=True)
+continue_messaging_thread.start()
 
 def token_required(f):
     @wraps(f)
@@ -87,7 +215,7 @@ def watch_memory_builder_queue():
     while True:
         try:
             # Wait for 2 minutes
-            time.sleep(60*2)
+            time.sleep(30)
             # Check if there is an item in the queue
             if not memory_builder_queue.empty():
                 # Get the item from the queue
@@ -96,6 +224,8 @@ def watch_memory_builder_queue():
                 memory_builder(username, persona, conversation_id)
         except Exception as e:
             print(f"Error in watch_queue: {e}")
+            tb = traceback.format_exc()
+            print(tb)
 
 # Start the background thread
 threading.Thread(target=watch_memory_builder_queue, daemon=True).start()
@@ -402,7 +532,7 @@ def query():
         
         send_buffer = ""
         last_send_time = time.time()
-        for type, content in chatapp.stream(data.get("query","")):
+        for type, content in chatapp.stream(data.get("query",""), wait_timeout=30):
             if type == "break":
                 if send_buffer:
                     yield f"data: {json.dumps({'content': send_buffer})}\n\n"
@@ -411,7 +541,8 @@ def query():
                 yield f"data: {json.dumps({'type': 'break', 'content': ''})}\n\n"
                 continue
             elif type == "system":
-                yield f"data: {json.dumps({'type': 'system', 'content': content})}\n\n"
+                print("System message: " + str(content))
+                yield f"data: {json.dumps({'type': 'system', 'content': str(content)})}\n\n"
                 continue
             elif type == "content":
                 if content:
@@ -528,6 +659,23 @@ def login():
 @token_required
 def protected_route():
     return jsonify({"message": "This is a protected route. You have valid authentication."}), 200
+
+@app.route('/watch', methods=['GET'])
+@token_required
+def watch_conversation():
+    conversation_id = request.args.get('conversation_id')
+    persona = request.args.get('persona')
+    if not conversation_id:
+        return jsonify({"error": "Conversation ID is required"}), 400
+    if not persona:
+        return jsonify({"error": "Persona is required"}), 400
+
+    config_manager = LocalConfigManager(g.username, persona)
+    chatapp = ChatApp(config_manager, persona, conversation_id)
+    watch_status = chatapp.get_watch_status()
+    return jsonify(watch_status)
+
+
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8001) 

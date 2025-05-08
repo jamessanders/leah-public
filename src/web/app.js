@@ -27,6 +27,9 @@ const App = () => {
     const [isModalOpen, setIsModalOpen] = React.useState(false);
     const [modalInputValue, setModalInputValue] = React.useState('');
     const [submissionQueue, setSubmissionQueue] = React.useState([]);
+    const [openInboxCount, setOpenInboxCount] = React.useState(0);
+    const [closedInboxCount, setClosedInboxCount] = React.useState(0);
+    const [previousOpenInboxCount, setPreviousOpenInboxCount] = React.useState(0);
     
     // Authentication state
     const [isAuthenticated, setIsAuthenticated] = React.useState(false);
@@ -93,6 +96,201 @@ const App = () => {
             localStorage.setItem('conversationId', conversationId);
         }
     }, [conversationId]);
+
+    const handleSubmit = React.useCallback(async (input = inputValue) => {
+        if (loading) {
+            setSubmissionQueue(prevQueue => [...prevQueue, input]);
+            console.log("Currently loading, queuing submission:", input);
+            setInputValue(''); // Clear the input field immediately when queuing
+            console.log("Updated submission queue (after queuing):", submissionQueue);
+            return;
+        }
+
+        console.log("Submitting input:", input);
+        try {
+            setLoading(true); // Show loading message
+            const updatedHistory = [...conversationHistory];
+            setConversationHistory(updatedHistory);
+            // Only add user input to responses if it's not empty
+            const display_input = input.trim() ? input : "...";
+            setResponses([...responses, { role: 'user', content: display_input }]);
+            setConversationHistory([...responses, { role: 'user', content: display_input }]);
+            
+            setInputValue(''); // Clear the input field before submitting
+            setModalInputValue('');
+
+            const res = await fetch('/query', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'X-Username': username
+                },
+                body: JSON.stringify({ 
+                    query: input, 
+                    conversation_id: conversationId,
+                    persona: selectedPersona,
+                    context: modalInputValue
+                }),
+            });
+
+            const status = res.status;
+            if (status === 401) {
+                setIsAuthenticated(false);
+                setUsername('');
+                setToken('');
+                setConversationHistory([]);
+                setResponses([]);
+                return;
+            }
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder('utf-8');
+
+            let assistantResponse = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const chunk = decoder.decode(value, { stream: true });
+
+                // Split the chunk into individual JSON objects
+                const jsonObjects = chunk.split('\n\n').filter(Boolean);
+                for (const jsonObject of jsonObjects) {
+                    try {
+                        // Strip the 'data:' prefix and parse the JSON response
+                        const jsonResponse = JSON.parse(jsonObject.replace(/^data:\s*/, ''));
+                        console.log("JSON response:", jsonResponse);
+                        if (jsonResponse.type === 'conversation_id') {
+                            setConversationId(jsonResponse.id);
+                        } else if (jsonResponse.type === 'system' && jsonResponse.content) {
+                            console.log('System message:', jsonResponse.content);
+                            setResponses(prevResponses => {
+                                const lastResponse = prevResponses[prevResponses.length - 1];
+                                if (lastResponse.role === 'assistant') {
+                                    // Insert system message before the last assistant response
+                                    return [...prevResponses.slice(0, -1), { role: 'system', content: `${jsonResponse.content}` }, lastResponse];
+                                } else {
+                                    // Add system message normally
+                                    return [...prevResponses, { role: 'system', content: `${jsonResponse.content}` }];
+                                }
+                            });
+                        } else if (jsonResponse.type === 'end') {
+                            setLoading(false); // Hide loading message
+                            console.log("Finished processing submission, checking queue");
+                            console.log("DONE Submission queue:", submissionQueue);
+                            processNextSubmission(); // Process the next submission in the queue
+                        } else if (jsonResponse.content) {
+                            // Append content as plain text
+                            const plainTextContent = jsonResponse.content.trim() ? jsonResponse.content : "...";
+                            assistantResponse += plainTextContent;
+                            setResponses(prevResponses => {
+                                const lastResponse = prevResponses[prevResponses.length - 1];
+                                    if (lastResponse.role === 'assistant') {
+                                        // Append to the last assistant response
+                                        lastResponse.content += plainTextContent;
+                                        return [...prevResponses.slice(0, -1), lastResponse];
+                                    } else {
+                                        // Add a new assistant response
+                                        return [...prevResponses, { role: 'assistant', content: plainTextContent }];
+                                    }
+                            });
+                        } else if (jsonResponse.filename && !isMuted) {
+                            console.log("Adding voice to queue:", jsonResponse.filename);
+                            addToAudioQueue("/voice/" + jsonResponse.filename); // Add to the audio queue only if not muted
+                        } else if (jsonResponse.type === "history" && jsonResponse.history) {
+                            // Update the conversation history with the server's version
+                            console.log("Updating conversation history with server's version:", jsonResponse.history);
+                            setConversationHistory(jsonResponse.history);
+                        } 
+                    } catch (error) {
+                        console.error('Error parsing JSON:', error);
+                    }
+                }
+            }
+
+                setConversationHistory(prevHistory => [...prevHistory, { role: 'assistant', content: assistantResponse }]);
+
+                // Convert the complete response from markdown to HTML
+                const htmlResponse = marked.parse(assistantResponse);
+
+                // Overwrite the UI with the converted HTML content
+                setResponses(prevResponses => {
+                    // Filter out system messages
+                    const filteredResponses = prevResponses.filter(response => !response.content.includes('<i>'));
+                    const lastResponse = filteredResponses[filteredResponses.length - 1];
+                    if (lastResponse && lastResponse.role === 'assistant') {
+                        // Overwrite the last assistant response
+                        lastResponse.content = htmlResponse;
+                        return [...filteredResponses.slice(0, -1), lastResponse];
+                    } else {
+                        // Add a new assistant response
+                        return [...filteredResponses, { role: 'assistant', content: htmlResponse }];
+                    }
+                });
+            
+        }    catch (error) {
+            console.error('Error:', error);
+            setLoading(false);
+        } 
+    }, [loading, conversationHistory, responses, inputValue, token, username, conversationId, selectedPersona, modalInputValue, isMuted, submissionQueue]);
+
+    // Add periodic watch polling
+    React.useEffect(() => {
+        let watchInterval;
+        
+        const pollWatch = async () => {
+            if (!conversationId || !token || !username) return;
+            
+            try {
+                const response = await fetch(`/watch?conversation_id=${conversationId}&username=${username}&persona=${selectedPersona}`, {
+                    headers: {
+                        'Authorization': `Bearer ${token}`
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('Watch status:', data);
+                    
+                    // Store previous open inbox count before updating
+                    setPreviousOpenInboxCount(openInboxCount);
+                    
+                    setOpenInboxCount(data.open_inboxes || 0);
+                    setClosedInboxCount(data.closed_inboxes || 0);
+
+                    // Check if we transitioned from having background tasks to updates ready
+                    // and no query is currently in flight (loading is false)
+                    if (previousOpenInboxCount > 0 && 
+                        data.open_inboxes === 0 && 
+                        data.closed_inboxes > 0 && 
+                        !loading) {
+                        // Add 2 second delay before auto-submitting
+                        
+                        setTimeout(() => {
+                            handleSubmit("");
+                        }, 1000);
+                        
+                    }
+                }
+            } catch (error) {
+                console.error('Watch polling error:', error);
+            }
+        };
+
+        if (conversationId && token && username) {
+            // Initial check
+            pollWatch();
+            // Set up interval for subsequent checks
+            watchInterval = setInterval(pollWatch, 5000);
+        }
+
+        // Cleanup interval on unmount or when dependencies change
+        return () => {
+            if (watchInterval) {
+                clearInterval(watchInterval);
+            }
+        };
+    }, [conversationId, token, username, selectedPersona, openInboxCount, previousOpenInboxCount, loading, handleSubmit]);
 
     // Handle login form input changes
     const handleLoginInputChange = (e) => {
@@ -217,139 +415,6 @@ const App = () => {
         }
     }, [submissionQueue]);
 
-    const handleSubmit = async (input = inputValue) => {
-        if (loading) {
-            setSubmissionQueue(prevQueue => [...prevQueue, input]);
-            console.log("Currently loading, queuing submission:", input);
-            setInputValue(''); // Clear the input field immediately when queuing
-            console.log("Updated submission queue (after queuing):", submissionQueue);
-            return;
-        }
-
-        console.log("Submitting input:", input);
-        try {
-            setLoading(true); // Show loading message
-            const updatedHistory = [...conversationHistory];
-            setConversationHistory(updatedHistory);
-            setResponses([...responses, { role: 'user', content: input }]);
-            setConversationHistory([...responses, { role: 'user', content: input }]);
-            setInputValue(''); // Clear the input field before submitting
-            setModalInputValue('');
-
-            const res = await fetch('/query', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
-                    'X-Username': username
-                },
-                body: JSON.stringify({ 
-                    query: input, 
-                    conversation_id: conversationId,
-                    persona: selectedPersona,
-                    context: modalInputValue
-                }),
-            });
-
-            const status = res.status;
-            if (status === 401) {
-                setIsAuthenticated(false);
-                setUsername('');
-                setToken('');
-                setConversationHistory([]);
-                setResponses([]);
-                return;
-            }
-            const reader = res.body.getReader();
-            const decoder = new TextDecoder('utf-8');
-
-            let assistantResponse = '';
-
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) break;
-                const chunk = decoder.decode(value, { stream: true });
-
-                // Split the chunk into individual JSON objects
-                const jsonObjects = chunk.split('\n\n').filter(Boolean);
-                for (const jsonObject of jsonObjects) {
-                    try {
-                        // Strip the 'data:' prefix and parse the JSON response
-                        const jsonResponse = JSON.parse(jsonObject.replace(/^data:\s*/, ''));
-                        console.log("JSON response:", jsonResponse);
-                        if (jsonResponse.type === 'conversation_id') {
-                            setConversationId(jsonResponse.id);
-                        } else if (jsonResponse.type === 'system' && jsonResponse.content) {
-                            console.log('System message:', jsonResponse.content);
-                            setResponses(prevResponses => {
-                                const lastResponse = prevResponses[prevResponses.length - 1];
-                                if (lastResponse.role === 'assistant') {
-                                    // Insert system message before the last assistant response
-                                    return [...prevResponses.slice(0, -1), { role: 'system', content: `${jsonResponse.content}` }, lastResponse];
-                                } else {
-                                    // Add system message normally
-                                    return [...prevResponses, { role: 'system', content: `${jsonResponse.content}` }];
-                                }
-                            });
-                        } else if (jsonResponse.type === 'end') {
-                            setLoading(false); // Hide loading message
-                            console.log("Finished processing submission, checking queue");
-                            console.log("DONE Submission queue:", submissionQueue);
-                            processNextSubmission(); // Process the next submission in the queue
-                        } else if (jsonResponse.content) {
-                            // Append content as plain text
-                            const plainTextContent = jsonResponse.content;
-                            assistantResponse += plainTextContent;
-                            setResponses(prevResponses => {
-                                const lastResponse = prevResponses[prevResponses.length - 1];
-                                if (lastResponse.role === 'assistant') {
-                                    // Append to the last assistant response
-                                    lastResponse.content += plainTextContent;
-                                    return [...prevResponses.slice(0, -1), lastResponse];
-                                } else {
-                                    // Add a new assistant response
-                                    return [...prevResponses, { role: 'assistant', content: plainTextContent }];
-                                }
-                            });
-                        } else if (jsonResponse.filename && !isMuted) {
-                            console.log("Adding voice to queue:", jsonResponse.filename);
-                            addToAudioQueue("/voice/" + jsonResponse.filename); // Add to the audio queue only if not muted
-                        } else if (jsonResponse.type === "history" && jsonResponse.history) {
-                            // Update the conversation history with the server's version
-                            console.log("Updating conversation history with server's version:", jsonResponse.history);
-                            setConversationHistory(jsonResponse.history);
-                        } 
-                    } catch (error) {
-                        console.error('Error parsing JSON:', error);
-                    }
-                }
-            }
-
-            // Store the complete assistant response in conversation history
-            setConversationHistory(prevHistory => [...prevHistory, { role: 'assistant', content: assistantResponse }]);
-
-            // Convert the complete response from markdown to HTML
-            const htmlResponse = marked.parse(assistantResponse);
-
-            // Overwrite the UI with the converted HTML content
-            setResponses(prevResponses => {
-                // Filter out system messages
-                const filteredResponses = prevResponses.filter(response => !response.content.includes('<i>'));
-                const lastResponse = filteredResponses[filteredResponses.length - 1];
-                if (lastResponse && lastResponse.role === 'assistant') {
-                    // Overwrite the last assistant response
-                    lastResponse.content = htmlResponse;
-                    return [...filteredResponses.slice(0, -1), lastResponse];
-                } else {
-                    // Add a new assistant response
-                    return [...filteredResponses, { role: 'assistant', content: htmlResponse }];
-                }
-            });
-        }    catch (error) {
-            console.error('Error:', error);
-        } 
-    };
-
     const useAudioPlayer = () => {
         // We are managing promises of audio urls instead of directly storing strings
         // because there is no guarantee when openai tts api finishes processing and resolves a specific url
@@ -444,6 +509,13 @@ const App = () => {
         }
     }, [responses]);
 
+    // Scroll to bottom on initial mount
+    React.useEffect(() => {
+        if (responseAreaRef.current) {
+            responseAreaRef.current.scrollTop = responseAreaRef.current.scrollHeight;
+        }
+    }, []); // Empty dependency array means this runs once on mount
+
     // Detect if the device is mobile
     React.useEffect(() => {
         const checkIfMobile = () => {
@@ -525,6 +597,50 @@ React.useEffect(() => {
                     fill: 'none',
                     strokeWidth: '5'
                 })
+            )
+        );
+    };
+
+    // Add the NotificationBubble component
+    const NotificationBubble = ({ openCount, closedCount }) => {
+        const [isVisible, setIsVisible] = React.useState(false);
+        
+        React.useEffect(() => {
+            if (openCount > 0 || closedCount > 0) {
+                setIsVisible(true);
+            } else {
+                // Add a small delay before hiding to allow the fade out animation
+                const timeout = setTimeout(() => {
+                    setIsVisible(false);
+                }, 300); // Match this with the CSS transition duration
+                return () => clearTimeout(timeout);
+            }
+        }, [openCount, closedCount]);
+
+        if (!isVisible && openCount === 0 && closedCount === 0) return null;
+        
+        const showUpdatesReady = openCount === 0 && closedCount > 0;
+        
+        return React.createElement('div', {
+            className: `notification-bubble ${isVisible ? 'visible' : ''} ${showUpdatesReady ? 'with-updates' : 'with-tasks'}`
+        },
+            React.createElement('div', {
+                className: 'notification-content'
+            },
+                showUpdatesReady ? null : React.createElement('svg', {
+                    className: 'loading-spinner',
+                    viewBox: '0 0 50 50'
+                },
+                    React.createElement('circle', {
+                        className: 'loading-spinner-circle',
+                        cx: '25',
+                        cy: '25',
+                        r: '20',
+                        fill: 'none',
+                        strokeWidth: '5'
+                    })
+                ),
+                showUpdatesReady ? 'Updates Ready' : `${openCount} Background Task${openCount > 1 ? 's' : ''}`
             )
         );
     };
@@ -660,6 +776,14 @@ React.useEffect(() => {
                         }),
                         React.createElement('div', { onClick: handleModalClose, className: 'close-modal', style: { cursor: 'pointer', padding: '10px 20px', backgroundColor: '#007bff', color: '#fff', borderRadius: '5px', display: 'inline-block', textAlign: 'center', marginTop: '10px' } }, 'Close')
                     )
+                ),
+                React.createElement('div', { 
+                    className: 'notification-container'
+                },
+                    React.createElement(NotificationBubble, { 
+                        openCount: openInboxCount,
+                        closedCount: closedInboxCount
+                    })
                 )
             )
         )

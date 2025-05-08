@@ -11,7 +11,7 @@
             "type": "chatgpt"
         },
         "local": {
-            "type": "ollama",
+            "type": "lmstudio",
             "url": "http://localhost:1234/v1/",
             "api_key": "lm-studio",
             "headers": {
@@ -62,11 +62,12 @@
                 "If you find that you are not capable of performing a task always delegate it to an agent without asking the user"
             ],
             "tools": [
-                "AgentAction",
+                "AgentAction",  
                 "NotesAction",
                 "LogAction",
                 "FileReadAction",
-                "ImageGen"
+                "ImageGen",
+                "EmailAction"
             ]
         },
         "Selene": {
@@ -99,7 +100,9 @@
                 "NotesAction",
                 "LogAction",
                 "FileReadAction",
-                "ImageGen"
+                "FileWriteAction",
+                "ImageGen",
+                "EmailAction"
             ]
         },
         "Athena": {
@@ -132,7 +135,8 @@
                 "NotesAction",
                 "LogAction",
                 "FileReadAction",
-                "ImageGen"
+                "ImageGen",
+                "EmailAction"
             ]
         },
         "project_manager": {
@@ -149,14 +153,18 @@
                 "You delegate tasks to other agents and keep track of the status of the project",
                 "You communicate clearly between agents passing information back and forth as needed",
                 "You always make sure the project is completed to the highest standard",
-                "Always gather requirements before starting a project",
-                "Do research before anything else by utilising the research assistant"
+                "Always gather requirements before starting a project but trust your own judgement for small details",
+                "Do research before anything else by utilising the research assistant",
+                "You provide very detailed requirements to other agents with all the necassary data inline when making queries to them"
             ],
+            "threaded": true,
             "agent_description": "Agent that is a project manager able to manage multiple agents and tasks, a lot of the time this is the first agent you should talk to and most agent communication should go through her.",
             "tools": [
                 "AgentAction",
                 "FileReadAction",
-                "NotesAction"
+                "FileWriteAction",
+                "NotesAction",
+                "EmailAction"
             ]
         },
         "investigator": {
@@ -175,6 +183,7 @@
                 "You work closely with a researcher, coder and project manager to develop tools to help with your investigations",
                 "You report your results in great detail to the user"
             ],
+            "threaded": true,
             "agent_description": "Agent that has general knowledge and can answer questions on a wide range of topics",
             "tools": [
                 "AgentAction",
@@ -184,7 +193,9 @@
                 "ProcessAction",
                 "TavilyAction",
                 "ImageGen",
-                "FileReadAction"
+                "FileReadAction",
+                "FileWriteAction",
+                "EmailAction"
             ]
         },
         "sysadmin": {
@@ -205,10 +216,13 @@
                 "If you do not have tools to do something ask an agent for help"
             ],
             "agent_description": "An agent that can help manage files and run scripts.  This agent can read files, write files, and run scripts and other executables.  They can also start services by running scripts in the background.",
+            "threaded": true,
             "tools": [
+                "AgentAction",
                 "FileReadAction",
                 "FileWriteAction",
-                "ProcessAction"
+                "ProcessAction",
+                "EmailAction"
             ]
         },
         "websurfer": {
@@ -223,9 +237,12 @@
                 "when searching provide several links to the user with descriptions"
             ],
             "agent_description": "Agent that is able to search the web and download links. This agent can search the web, download files and perform most basic web surfing task.  If you are not sure what urls to look at for something this agent can help.",
+            "threaded": true,
             "tools": [
+                "AgentAction",
                 "LinkAction",
-                "TavilyAction"
+                "TavilyAction",
+                "EmailAction"
             ]
         },
         "coder": {
@@ -246,14 +263,17 @@
                 "If you don't know how to do something trying looking up documentation on the web or ask a researcher to look for information",
                 "You proactivly fix problems with the code you write"
             ],
+            "threaded": true,
             "agent_description": "Agent that is a highly skilled coder, this agent is also able to run scripts, write to files and write code.  Best choice for coding tasks (html,css,bash,js,python,etc).",
             "tools": [
+                "AgentAction",
                 "LinkAction",
                 "NotesAction",
                 "TavilyAction",
                 "FileWriteAction",
                 "FileReadAction",
-                "ProcessAction"
+                "ProcessAction",
+                "EmailAction"
             ]
         },
         "news_reporter": {
@@ -265,6 +285,7 @@
             "description": "You are an expert news reporter, you are able to find information on a given topic",
             "use_broker": true,
             "traits": [
+                "Check nytimes, cnn, bbc, first and only do a web search if that fails",
                 "You always stay on topic",
                 "You use tools when needed",
                 "You always format your response in markdown and provide links",
@@ -273,10 +294,13 @@
                 "You use a variety of news sources to find information like BBC, CNN, Reuters, New York Times",
                 "For tech news use TechCrunch, The Verge, Ars Technica, CNET, and others"
             ],
+            "threaded": true,
             "agent_description": "Agent that is an expert news reporter",
             "tools": [
+                "AgentAction",
                 "LinkAction",
-                "TavilyAction"
+                "TavilyAction",
+                "EmailAction"
             ]
         },
         "weather_reporter": {
@@ -293,10 +317,13 @@
                 "You always format your response in markdown and provide links",
                 "All links should be full urls"
             ],
+            "threaded": true,
             "agent_description": "Agent that is an expert weather reporter",
             "tools": [
+                "AgentAction",
                 "LinkAction",
-                "TavilyAction"
+                "TavilyAction",
+                "EmailAction"
             ]
         },
         "researcher": {
@@ -316,13 +343,18 @@
                 "You always do deep comprehsive research",
                 "You always cite your sources and provide links",
                 "You are the research expert do not delegate task to research assistant (because you are the research expert)",
-                "Dig into links after you search to get the most information possible"
+                "Dig into links after you search to get the most information possible",
+                "Keep detailed notes of your research and reference them before doing any web searches"
             ],
+            "threaded": true,
             "agent_description": "Agent that is an expert research assistant able to find information on a given topic and generate detailed reports",
             "tools": [
                 "LinkAction",
                 "TavilyAction",
-                "AgentAction"
+                "AgentAction",
+                "FileReadAction",
+                "NotesAction",
+                "LogAction"
             ]
         },
         "summer": {

@@ -26,7 +26,7 @@ class FilesSandbox:
             str: File path with sandbox prefix
         """
         # Normalize the path and remove any leading/trailing slashes
-        normalized = os.path.normpath(file_path.strip('/')).replace('\\', '/')
+        normalized = os.path.normpath(str(file_path).strip('/')).replace('\\', '/')
         return os.path.join(self.sandbox_path, normalized).replace('\\', '/')
         
     def _remove_sandbox_path(self, file_path: str) -> str:

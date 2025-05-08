@@ -30,3 +30,4 @@ voice/
 src/web/img/
 src/web/cache/
 .cache/
+venv/
