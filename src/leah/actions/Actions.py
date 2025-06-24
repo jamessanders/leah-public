@@ -1,6 +1,5 @@
 from typing import List, Dict, Any
-from leah.llm.ChatApp import ChatApp
-from leah.actions import LinkAction, LogAction, NotesAction, TimeAction, WeatherAction, ImageGen, FileReadAction, FileWriteAction, AgentAction, ProcessAction, TavilyAction, EmailAction  
+from leah.actions import AgentAction, LinkAction, LogAction, NotesAction, TimeAction, ImageGen, FileReadAction, FileWriteAction, ProcessAction, TavilyAction, EmailAction, MessageAction, WaitAction, ChannelAction, TaskAction
 import json
 
 class Actions:
@@ -11,7 +10,7 @@ class Actions:
     context, persona settings, and local configuration.
     """
     
-    def __init__(self, config_manager, persona: str, query: str, chat_app: ChatApp):
+    def __init__(self, config_manager, persona: str, query: str, chat_app: Any):
         """
         Initialize the Actions class with the required parameters.
         
@@ -32,17 +31,23 @@ class Actions:
         
         available_actions = [
             LinkAction.LinkAction(config_manager, persona, query, self.chat_app),
-            NotesAction.NotesAction(config_manager, persona, query, self.chat_app),
-            LogAction.LogAction(config_manager, persona, query, self.chat_app),
             ImageGen.ImageGen(config_manager, persona, query, self.chat_app),
             FileReadAction.FileReadAction(config_manager, persona, query, self.chat_app),
             FileWriteAction.FileWriteAction(config_manager, persona, query, self.chat_app),
             ProcessAction.ProcessAction(config_manager, persona, query, self.chat_app),
-            AgentAction.AgentAction(config_manager, persona, query, self.chat_app),
-            TavilyAction.TavilyAction(config_manager, persona, query, self.chat_app)
+            TavilyAction.TavilyAction(config_manager, persona, query, self.chat_app),
+            WaitAction.WaitAction(config_manager, persona, query, self.chat_app)
         ]
         persona_tools = config_manager.get_config().get_tools(persona)
         self.actions = [action for action in available_actions if action.__class__.__name__ in persona_tools]
+        
+        # Some default actions that are always available
+        self.actions.append(ChannelAction.ChannelAction(config_manager, persona, query, self.chat_app))
+        self.actions.append(MessageAction.MessageAction(config_manager, persona, query, self.chat_app))
+        self.actions.append(WaitAction.WaitAction(config_manager, persona, query, self.chat_app))
+        self.actions.append(TaskAction.TaskAction(config_manager, persona, query, self.chat_app))
+        self.actions.append(NotesAction.NotesAction(config_manager, persona, query, self.chat_app))
+        # self.actions.append(AgentAction.AgentAction(config_manager, persona, query, self.chat_app))
 
     def run_tool(self, tool_name: str, arguments: List[str]) -> str:
         tool_sp = tool_name.split(".")
@@ -61,20 +66,25 @@ class Actions:
           
         prompt = """
 ## Please follow these instructions:
- - Request a tool in the format of json: `{"action": "ActionName.tool_name", "arguments": "arguments_json"}`
- - Wrap the tool request in tool_code type markdown code block.  An example is:
-            ```tool_code
-            {"action": "ActionName.tool_name", "arguments": "arguments_json"}
-            ```
- - The tool request should be in plain text without any formatting.
- - arguments_json should be in the format of {"argument_name": "argument_value"}
- - Tool names should be in the format of ActionName.ToolName
- - You can use multiple tools in a single response.
- - Do not ask the user to provide the tool name, just respond with the tool.
- - Do not use tags like <|python_start|>
- - Just use tools without telling the user that you will perform a task.
- - Tool usage can be mixed with conversation text.
- - Do not call the same tool with the same arguments more than once in a conversation.
+
+    - Request a tool in the format of json: `{"tool": "ActionName.tool_name", "arguments": "arguments_json"}`
+    - Wrap the tool request in tool_code type markdown code block.  An example is:
+                ```tool_code
+                {"tool": "ActionName.tool_name", "arguments": "arguments_json"}
+                ```
+    - both tool and arguments are required parameters
+    - The tool request should be in plain text without any formatting.
+    - arguments_json should be in the format of {"argument_name": "argument_value"}
+    - Tool names should be in the format of ActionName.ToolName
+    - You can use multiple tools in a single response.
+    - Do not ask the user to provide the tool name, just respond with the tool.
+    - Do not use tags like <|python_start|>
+    - Just use tools without telling the user that you will perform a task.
+    - Tool usage can be mixed with conversation text.
+    - Do not call the same tool with the same arguments more than once in a conversation.
+    - Never use attempt to use a tool other than the ones provided to you below.
+    - Use as many tools as you need to answer the user's query.
+    - Don't just say you will use a tool, do it.
 
 ## Tools: 
 """

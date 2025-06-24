@@ -126,6 +126,47 @@ class ConversationStore:
         self.file_manager.put_file(filename, json.dumps(list(watched_inboxes)).encode())
         return True
         
+    def add_thread(self, conversation_id: str, thread_id: str) -> None:
+        """
+        Add a thread to the conversation.
+        
+        Args:
+            conversation_id (str): Unique identifier for the conversation
+            thread_id (str): Unique identifier for the thread
+        """
+
+        safe_id = conversation_id.replace('/', '_').replace('\\', '_')
+        filename = f"conversations/{safe_id}/threads.json"
+        data = self.file_manager.get_file(filename)
+        if data is not None:
+            try:
+                threads = json.loads(data.decode())
+            except json.JSONDecodeError:
+                threads = set()
+        else:
+            threads = set() 
+        threads.add(thread_id)
+        self.file_manager.put_file(filename, json.dumps(list(threads)).encode())
+        
+    def get_threads(self, conversation_id: str) -> Set[str]:
+        """
+        Get the set of threads for a conversation.
+        
+        Args:
+            conversation_id (str): Unique identifier for the conversation
+        """
+        if not conversation_id:
+            return set()
+        safe_id = conversation_id.replace('/', '_').replace('\\', '_')
+        filename = f"conversations/{safe_id}/threads.json"
+        data = self.file_manager.get_file(filename)
+        if data is not None:
+            try:
+                return set(json.loads(data.decode()))
+            except json.JSONDecodeError:
+                return set()
+        return set()
+
     def get_watched_inboxes(self, conversation_id: str) -> Set[str]:
         """
         Get the set of watched inboxes for a conversation.

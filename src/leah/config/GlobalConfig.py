@@ -10,14 +10,17 @@ from typing import Dict, Any
 from copy import deepcopy
 from datetime import datetime
 
+from leah.utils.DirectiveManager import DirectiveManager
+
 class GlobalConfig:
     """Configuration management class for the Leah script."""
     
     def __init__(self):
         """Initialize the configuration by loading from config.json."""
-        self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../config.json')
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.config_path = os.path.join(self.base_dir, '../../config.json')
         self.config = self._load_config()
-    
+
     def _load_config(self) -> Dict[str, Any]:
         """Load configuration from config.json and merge with .hey.config.json if it exists."""
         # Load the main config file
@@ -25,8 +28,7 @@ class GlobalConfig:
             config = json.load(f)
         
         # Check for user config in home directory
-        home_dir = os.path.expanduser("~")
-        user_config_path = os.path.join(home_dir, '.leah/config.json')
+        user_config_path = os.path.join(self.get_home_config_directory(), "config.json")
         
         if os.path.exists(user_config_path):
             try:
@@ -77,10 +79,7 @@ class GlobalConfig:
         """Get the Stable Diffusion URL from config."""
         return self.config.get('stable_diffusion', {})
 
-    def get_system_content(self, persona='default') -> str:
-        """Get the system content based on the specified persona."""
-        persona_config = self._get_persona_config(persona)
-        return f"{persona_config['description']}\n" + "\n".join(f"- {trait}" for trait in persona_config['traits']) + "\n- the users current time and date is " + datetime.now().strftime("%I:%M %p (%Z) on %A, %B %d %Y")
+    
     
     def get_use_broker(self, persona='default') -> bool:
         """Get the use broker setting for the specified persona."""
@@ -117,6 +116,13 @@ class GlobalConfig:
             return connector['type']
         return 'local'
 
+    def get_connector_rate_limit(self, connector_type: str) -> int:
+        """Get the connector rate limit for the specified persona. Rate limit is in requests per minute."""
+        if self.config['connectors'].get(connector_type):
+            connector = self.config['connectors'][connector_type]
+            return int(connector.get('rate_limit', 10))
+        return 10
+
     def get_ollama_api_key(self, persona='default') -> str:
         """Get the LMStudio API key from config."""
         if self._get_persona_config(persona).get('connector'):
@@ -124,7 +130,10 @@ class GlobalConfig:
             return connector.get('api_key', None)
         else:
             return None 
-
+    def get_gemini_api_key(self) -> str:
+        """Get the Gemini API key from config."""
+        return self.config['keys']['gemini']
+    
     def get_keys(self) -> Dict[str, str]:
         """Get the keys from config."""
         return self.config['keys']
@@ -137,7 +146,7 @@ class GlobalConfig:
         """Get the list of available personas."""
         visible_personas = []
         for persona, config in self.config['personas'].items():
-            if config.get('visible', False) and any(group in groups for group in config.get('group', "").split(",")):
+            if self.get_persona_config(persona).get('visible', False):
                 visible_personas.append(persona)
         return visible_personas
     
@@ -165,4 +174,24 @@ class GlobalConfig:
         """Get the configuration for a persona."""
         return self._get_persona_config(persona)
     
+    def get_config_path(self) -> str:
+        """Get the path to the main configuration file."""
+        return self.config_path
+
+    def get_project_directory(self) -> str:
+        """Get the path to the project config area."""
+        return os.path.abspath(os.path.dirname(self.config_path)) 
+    
+    def get_home_config_directory(self) -> str:
+        """Get the path to the user-specific configuration directory in the home directory."""
+        home_dir = os.path.expanduser("~")
+        return os.path.join(home_dir, '.leah')
+    
+    def get_channels(self) -> dict[str, Any]:
+        """Get the channels from config."""
+        return self.config['channels']
+    
+    def get_channel(self, channel: str) -> dict[str, Any]:
+        """Get the channel from config."""
+        return self.config['channels'].get(channel, None)
     

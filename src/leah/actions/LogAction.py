@@ -1,10 +1,9 @@
 from datetime import datetime
 from typing import List, Dict, Any
 from .IActions import IAction
-from leah.llm.ChatApp import ChatApp
 
 class LogAction(IAction):
-    def __init__(self, config_manager, persona: str, query: str, chat_app: ChatApp):
+    def __init__(self, config_manager, persona: str, query: str, chat_app: Any):
         self.config_manager = config_manager
         self.persona = persona
         self.query = query

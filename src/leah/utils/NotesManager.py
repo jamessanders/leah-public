@@ -9,7 +9,7 @@ class NotesManager:
             config_manager (LocalConfigManager): The LocalConfigManager instance to use for path management
         """
         self.config_manager = config_manager
-        self.notes_directory = self.config_manager.get_persona_path("notes")
+        self.notes_directory = self.config_manager.get_path("notes")
         if not os.path.exists(self.notes_directory):
             os.makedirs(self.notes_directory, exist_ok=True)
         # Create backup directory within notes directory
@@ -24,8 +24,8 @@ class NotesManager:
 
     def get_note(self, note_name: str) -> str:
         """Retrieve the content of a specific note file."""
-        if not note_name.endswith(".txt"):
-            note_name += ".txt"
+        if not note_name.endswith(".note"):
+            note_name += ".note"
         note_path = os.path.join(self.notes_directory, note_name)
         if os.path.exists(note_path):
             with open(note_path, 'r', encoding='utf-8') as file:
@@ -36,13 +36,14 @@ class NotesManager:
     def put_note(self, note_name: str, content: str) -> None:
         """Store content into a specific note file."""
         # Check if note exists and create backup if it does
-        if not note_name.endswith(".txt"):
-            note_name += ".txt"
+        note_name = os.path.basename(note_name).strip()
+        if not note_name.endswith(".note"):
+            note_name += ".note"
         note_path = os.path.join(self.notes_directory, note_name)
         if os.path.exists(note_path):
             from datetime import datetime
             timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-            backup_name = f"{os.path.splitext(note_name)[0]}_{timestamp}.txt"
+            backup_name = f"{os.path.splitext(note_name)[0]}_{timestamp}.note"
             backup_path = os.path.join(self.backup_directory, backup_name)
             with open(note_path, 'r', encoding='utf-8') as src, open(backup_path, 'w', encoding='utf-8') as dst:
                 dst.write(src.read())
@@ -51,9 +52,7 @@ class NotesManager:
 
     def get_all_notes(self) -> list[str]:
         """Retrieve the names of all note files."""
-        return [note_name for note_name in os.listdir(self.notes_directory) if note_name.endswith(".txt")]
-
-    
+        return [note_name for note_name in os.listdir(self.notes_directory) if note_name.endswith(".note")]
 
     def get_all_notes_content(self) -> str:
         """Retrieve the content of all note files and output them as a single string."""

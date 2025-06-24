@@ -14,4 +14,4 @@ REM Always install/update requirements
 pip install -r requirements.txt
 
 set PYTHONPATH=%PYTHONPATH%;%CD%
-python src\leah_server.py 
+python src\leah_server.py --listen

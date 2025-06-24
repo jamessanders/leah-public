@@ -91,7 +91,7 @@ class MailMan:
         while not self._pending_messages.empty():
             try:
                 message = self._pending_messages.get_nowait()
-                self._thread_pool.submit(self._message_handler.handle_message, message)
+                self._message_handler.handle_message(message)
             except Queue.Empty:
                 break
             

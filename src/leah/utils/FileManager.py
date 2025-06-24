@@ -99,7 +99,7 @@ class FileManager:
         rel_dir, filename = self._sanitize_path(file_path)
         self._ensure_directory_exists(rel_dir)
         
-        target_path = os.path.join(self.files_directory, rel_dir, filename)
+        target_path = os.path.abspath(os.path.join(self.files_directory, rel_dir, filename))
         
         # Create backup if file exists
         if os.path.exists(target_path):
@@ -111,7 +111,10 @@ class FileManager:
             os.makedirs(backup_dir, exist_ok=True)
             backup_path = os.path.join(backup_dir, backup_name)
             shutil.copy2(target_path, backup_path)
-            
+        
+        if isinstance(content, str):
+            content = content.encode('utf-8')
+
         with open(target_path, 'wb') as file:
             file.write(content)
             

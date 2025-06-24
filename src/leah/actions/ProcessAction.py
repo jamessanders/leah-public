@@ -4,17 +4,17 @@ import subprocess
 import venv
 from leah.actions.IActions import IAction
 from leah.utils.FilesSandbox import FilesSandbox
+from leah.utils.GlobalFileManager import GlobalFileManager
 from leah.utils.ProcessManager import ProcessManager
-from leah.llm.ChatApp import ChatApp
 runningProcesses = []
 
 class ProcessAction(IAction):
-    def __init__(self, config_manager, persona, query, chat_app: ChatApp):
+    def __init__(self, config_manager, persona, query, chat_app:Any):
         self.config_manager = config_manager
         self.persona = persona
         self.query = query
         self.chat_app = chat_app
-        self.file_manager = FilesSandbox(config_manager.get_file_manager(), "sandbox")
+        self.file_manager = GlobalFileManager(config_manager, '/', config_manager.get_sandbox_directory_path())
     def getTools(self):
         return [
             (self.run_script,
@@ -46,7 +46,59 @@ class ProcessAction(IAction):
              {"file_path": "<the full path of the script to run>",
               "args": "<optional space-separated list of arguments>",
               "interpreter": "<optional interpreter to use (e.g. python, node)>"}),
+            (self.run_command,
+             "run_command",
+             "Execute an arbitrary command and capture its output.",
+             {"command": "<the command to run>",
+              "args": "<optional arguments>",
+              "cwd": "<optional working directory for the command>"}),
         ]
+
+    def run_command(self, arguments: Dict[str, Any]):
+        command = arguments.get("command", "")
+        args = arguments.get("args", "")
+        cwd = arguments.get("cwd", None)
+
+        if not command:
+            yield ("result", "Command is required")
+            return
+
+        if not cwd:
+            cwd = self.config_manager.get_sandbox_directory_path()
+        yield ("system", f"Running command: {command}" + 
+               (f" with args: {args}" if args else "") +
+               (f" with cwd: {cwd}" if cwd else ""))
+
+
+        process_manager = ProcessManager(self.file_manager)
+        try:
+            stdout, stderr, return_code = process_manager.run_command(command, [args], cwd_path=cwd)
+            result = f"Command execution completed with return code {return_code}\n\n"
+            
+            if stdout:
+                result += "Standard Output:\n" + stdout + "\n"
+            if stderr:
+                result += "Standard Error:\n" + stderr + "\n"
+
+            result += "\n\nthe user has not seen the output of this script." 
+            print(result)
+                
+            yield ("result", result)
+            
+        except FileNotFoundError:
+            print("FileNotFoundError")
+            yield ("result", f"Command {command} not found")
+        except PermissionError as e:
+            print("PermissionError")
+            yield ("result", str(e))
+        except TimeoutError:
+            print("TimeoutError")
+            yield ("result", "Script execution was terminated because it timed out or attempted to read from stdin")
+        except Exception as e:
+            print(e)
+            yield ("result", f"Error executing script: {str(e)}")
+        
+        
 
     def run_script(self, arguments: Dict[str, Any]):
         file_path = arguments.get("file_path", "")
@@ -57,19 +109,19 @@ class ProcessAction(IAction):
         # Parse arguments if provided
         args_str = arguments.get("args", "")
         args = args_str.split() if args_str else None
-        
+        cwd = arguments.get("cwd", None)
         # Get interpreter if provided
         interpreter = arguments.get("interpreter", None)
         
         yield ("system", f"Running script: {file_path}" + 
                (f" with interpreter: {interpreter}" if interpreter else "") +
-               (f" with args: {args_str}" if args_str else ""))
+               (f" with args: {args_str}" if args_str else "") +
+               (f" with cwd: {cwd}" if cwd else ""))
 
        
         process_manager = ProcessManager(self.file_manager)
-        
         try:
-            stdout, stderr, return_code = process_manager.run_script(file_path, args, interpreter)
+            stdout, stderr, return_code = process_manager.run_script(file_path, args, interpreter, cwd_path=cwd)
             result = f"Script execution completed with return code {return_code}\n\n"
             
             if stdout:
@@ -100,7 +152,7 @@ class ProcessAction(IAction):
         venv_path = arguments.get("venv_path", "")
         requirements = arguments.get("requirements", "")
         args_str = arguments.get("args", "")
-        
+        cwd = self.config_manager.get_sandbox_directory_path()
         if not file_path or not venv_path:
             yield ("end", "File path and virtual environment path are required")
             return
@@ -157,7 +209,7 @@ class ProcessAction(IAction):
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
-                cwd=os.path.dirname(os.path.abspath(file_path))
+                cwd=cwd
             )
             
             stdout, stderr = process.communicate(timeout=60)
@@ -185,7 +237,7 @@ class ProcessAction(IAction):
         if not file_path:
             yield ("result", "File path is required")
             return
-        
+        cwd = self.config_manager.get_sandbox_directory_path()
         # Parse arguments if provided
         args_str = arguments.get("args", "")
         args = args_str.split() if args_str else None
@@ -200,7 +252,7 @@ class ProcessAction(IAction):
         process_manager = ProcessManager(self.file_manager)
 
         try:
-            pid = process_manager.run_script_background(file_path, args, interpreter) 
+            pid = process_manager.run_script_background(file_path, args, interpreter, cwd_path=cwd) 
             yield ("result", f"Script started in background with PID: {pid}")
         except Exception as e:
             yield ("result", f"Error starting script: {str(e)}") 

@@ -3,10 +3,9 @@ from typing import List, Dict, Any, Callable
 from .IActions import IAction
 from .utils import fetch_url_with_selenium
 from selenium.webdriver.common.by import By
-from leah.llm.ChatApp import ChatApp
 
 class LinkAction(IAction):
-    def __init__(self, config_manager, persona: str, query: str, chat_app: ChatApp):
+    def __init__(self, config_manager, persona: str, query: str, chat_app: Any):
         self.config_manager = config_manager
         self.persona = persona
         self.query = query
@@ -42,11 +41,11 @@ class LinkAction(IAction):
         now = datetime.now()
         today = now.strftime("%B %d, %Y")
         return f"""
-Here is some context for the query:
+I have downloaded the contents of the url {extracted_url} and found the following:
+
 {context}
 
-Source: {extracted_url} (Last updated {today})
-
+----
 """
     def fetch_stock_info(self, arguments: Dict[str, Any]):
         try:
@@ -81,6 +80,6 @@ Source: {extracted_url} (Last updated {today})
             url = arguments['url']
             yield ("system", "Reading contents of url: " + url)
             main_content = fetch_url_with_selenium(url)
-            yield ("result", self.context_template(self.query, main_content, url))
+            yield ("result", self.context_template(self.query, "<text>\n" + main_content + "\n</text>", url))
         except Exception as e:
             yield ("result", self.context_template(self.query, "Error fetching the url with Selenium", url))

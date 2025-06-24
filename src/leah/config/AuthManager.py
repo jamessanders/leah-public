@@ -5,17 +5,16 @@ import secrets
 import time
 from pathlib import Path
 from typing import Dict, Any, Optional
-from leah.config.LocalConfigManager import LocalConfigManager
 
 class AuthManager:
-    def __init__(self):
+    def __init__(self, config_manager: Any):
         """
         Initialize the AuthManager with a user ID.
         
         Args:
             user_id (str): The user ID to create a config directory for
         """
-        self.config_manager = LocalConfigManager("auth")
+        self.config_manager = config_manager
         self.config_path = self.config_manager.get_path("auth.json")
         self.auth_data: Dict[str, Any] = {}
         self.load_auth_data()
@@ -159,7 +158,7 @@ class AuthManager:
         if token not in self.auth_data["users"][username]["tokens"]:
             return None
 
-        return self.auth_data["users"][username]["config"]
+        return self.auth_data["users"][username].get("config", {})
 
     def update_auth_data(self, new_data: Dict[str, Any]) -> None:
         """

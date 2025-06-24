@@ -1,9 +1,16 @@
 from datetime import datetime
 from flask import Flask, send_from_directory, request, jsonify, g
 from functools import wraps
+from leah.utils import ChannelNameGuide
+from leah.utils.ChannelNameGuide import get_direct_channel_name
 from leah.actions import Actions, LogAction
+from leah.actors.SystemActor import SystemActor
+from leah.actors.TaskActor import TaskActor
 from leah.config.AuthManager import AuthManager
 from leah.llm.ChatApp import ChatApp
+from leah.utils.Message import MessageType
+from leah.utils.SubscriptionService import SubscriptionService
+from leah.utils.PubSub import PubSub
 from leah.utils.ConversationStore import ConversationStore
 from leah.config.GlobalConfig import GlobalConfig
 from leah.config.LocalConfigManager import LocalConfigManager
@@ -11,7 +18,7 @@ from leah.utils.LogItem import LogItem, LogCollection
 from leah.utils.LogManager import LogManager
 from leah.utils.NotesManager import NotesManager
 from leah.llm.StreamProcessor import StreamProcessor
-from leah.utils.PostOffice import MailMan, PrintMessageHandler, PostOffice, Message, MessageHandler
+from leah.actors.PersonaActor import PersonaActor
 from urllib.parse import urlparse
 import asyncio
 import edge_tts
@@ -27,6 +34,9 @@ import tiktoken
 import time
 import traceback
 import uuid
+from leah.utils.PubSub import Message
+import argparse
+from leah.utils.ChannelContextManager import ChannelContextManager, ContextType
 
 app = Flask(__name__)
 
@@ -39,196 +49,70 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'web')
 # Initialize mimetypes
 mimetypes.init()
 
- # Initialize PostOffice singleton and system inbox
-post_office = PostOffice.get_instance()    
+def clean_name(name: str) -> str:
+    return name.replace("@", "")
 
-class AgentMessageHandler(MessageHandler):
-    def handle_message(self, message: Message) -> None:
-        """Handle incoming messages by starting a ChatApp."""
-        try:
-            # Use the existing ChatApp from the message
-            print(" +++ Processing message for inbox " + message.return_inbox_id)
-            query, chatapp, source = message.body
-            response = ""
-            
-            # Get all watch inboxes for this conversation
-            post_office = PostOffice.get_instance()
-            
-            print(" +++ Query: " + query)
-            for type, content in chatapp.stream(query, wait_timeout=1):
-                if type == "content":
-                    response += content
-                elif type == "break":
-                    response += "\n\n"
-                elif type == "system":
-                    print("Sending system message to inbox " + message.return_inbox_id)
-                    # Send to original inbox
-                    post_office.send_message(
-                        to_inbox_id=message.return_inbox_id,
-                        return_inbox_id=None,
-                        body=(type, content, source)
-                    )
-            if chatapp.is_watching():
-                print(" +++ Sending continue message to inbox " + message.return_inbox_id)
-                post_office.send_message(
-                    to_inbox_id="@continue",
-                    return_inbox_id=message.return_inbox_id,
-                    body=(chatapp, response)
-                )
-            else:
-                print(" +++ No need to wait for continue message, sending final response to inbox " + message.return_inbox_id)
-                # Send final response to original inbox
-                post_office.send_message(
-                    to_inbox_id=message.return_inbox_id,
-                    return_inbox_id=None,
-                    body=("content", response, "")
-                )
-                post_office.close_inbox(message.return_inbox_id)
+actors = {}
 
-        except Exception as e:
-                    print(f"Error in ChatMessageHandler: {str(e)}")
-                    print(traceback.format_exc())
+# Initialize config and pubsub
+config = GlobalConfig()
+pubsub = PubSub.get_instance()
 
-class ContinueMessageHandler(MessageHandler):
-    def handle_message(self, message: Message) -> None:
-        chatapp, response = message.body
-        return_inbox = message.return_inbox_id
+for persona in config.get_personas():
+    actor = PersonaActor(persona)
+    actor.listen()
+    actors[persona] = actor
 
-        print(" +++ Continue message receiving...")
+system_actor = SystemActor()
+system_actor.listen()
 
-        if chatapp.is_watching():
-            for (type,content,source) in chatapp.watch(5):
-                if type == "content":
-                    response += content
-                elif type == "break":
-                    response += "\n\n"
-                elif type == "system":
-                    post_office.send_message(
-                        to_inbox_id=return_inbox,
-                        return_inbox_id=None,
-                        body=(type, content, source)
-                    )
-        if chatapp.is_watching():
-            print(" +++ Still waiting sending continue message to inbox AGAIN " + return_inbox)
-            post_office.send_message(
-                to_inbox_id="@continue",
-                return_inbox_id=return_inbox,
-                body=(chatapp, response)
-            )
-        else:
-            # Send final response to original inbox
-            print(" +++ Done with continuation thread sending final response to inbox " + return_inbox)
-            post_office.send_message(
-                to_inbox_id=return_inbox,
-                return_inbox_id=None,
-                body=("content", response, "")
-            )
-            post_office.close_inbox(message.return_inbox_id)
-                
-        
+task_actor = TaskActor()
+task_actor.listen()
 
-# Initialize messaging system
-def initialize_agents():
-    print(" +++ Initializing agents")
-    config = GlobalConfig()
-    watched_inboxes = []
-    for persona in config.get_personas():
-        if config.get_persona_config(persona).get("threaded"):
-            boxId = persona + "@agents"
-            watched_inboxes.append(boxId)
-            post_office.create_inbox(boxId)
+subscription_service = SubscriptionService()
+subscription_service.bind_subscribers()
 
-    mail_man = MailMan(
-        post_office=post_office,
-        watched_inboxes=watched_inboxes,
-        message_handler=AgentMessageHandler(),
-        check_interval=0.5  # Check every 0.5 seconds
-    )
-    mail_man.start()  # Start the MailMan's internal operations
+channels = config.get_channels()
+for channel, channel_config in channels.items():
+    for subscriber in channel_config.get("subscribers", []):
+        subscription_service.subscribe(subscriber, channel)
+    for admin in channel_config.get("admins", []):
+        subscription_service.make_admin(admin, channel)
 
-# Start messaging system initialization in a separate thread
-messaging_thread = threading.Thread(target=initialize_agents, daemon=True)
-messaging_thread.start()
+subscription_service.subscribe("@sanders", "#system-chan")
+subscription_service.subscribe("@james", "#system-chan")
 
-def initialize_continue_messaging():
-    print(" +++ Initializing continue messaging")
-    post_office = PostOffice.get_instance()
-    post_office.create_inbox("@continue")
-    mail_man = MailMan(
-        post_office=post_office,
-        watched_inboxes=["@continue"],
-        message_handler=ContinueMessageHandler(),
-        check_interval=0.5  # Check every 0.5 seconds
-    )
-    mail_man.start()  # Start the MailMan's internal operations
-
-# Start messaging system initialization in a separate thread
-continue_messaging_thread = threading.Thread(target=initialize_continue_messaging, daemon=True)
-continue_messaging_thread.start()
-
-def token_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        token = None
-        
-        # Check if token is in the Authorization header
-        auth_header = request.headers.get('Authorization')
-        if auth_header and auth_header.startswith('Bearer '):
-            token = auth_header.split(' ')[1]
-        
-        # If no token in header, check if it's in the request args
-        if not token:
-            token = request.args.get('token')
-            
-        if not token:
-            return jsonify({"error": "Token is missing"}), 401
-            
-        # Get username from request args or headers
-        username = request.args.get('username') or request.headers.get('X-Username')
-        if not username:
-            return jsonify({"error": "Username is required for token validation"}), 401
-            
-        # Validate the token
-        auth_manager = AuthManager()
-        if not auth_manager.verify_token(username, token):
-            return jsonify({"error": "Invalid or expired token"}), 401
-            
-        # Set username on request state
-        g.username = username
-        g.token = token
-        g.user_config = auth_manager.get_user_config(username, token)
-        
-        # Set LocalConfigManager on request state
-        g.config_manager = LocalConfigManager(username)
-            
-        # Token is valid, proceed with the request
-        return f(*args, **kwargs)
+def overwatch_callback(channel_id: str, message: Message):
+    if message.from_user == "@system":
+        return
+    if not channel_id.startswith("#") or "->" in channel_id:
+        return
+    if not message.via_channel.startswith("#") or "->" in message.via_channel:
+        return
+    if channel_id == "#system-chan":
+        return
     
-    return decorated
+    if message.is_direct() or message.via_channel.startswith("@"):
+        return
+    # Find all @mentions in the message
+    mentions = re.findall(r'@([a-zA-Z0-9_]+)', message.content)
+    
+    if not mentions:
+        return
+        
+    for username in mentions:
+        if username in config.get_personas():
+            subscribers = subscription_service.get_channel_subscribers(message.via_channel)
+            if username not in subscribers:
+                content = f"{message.content}\n\nYou have been mention in the channel " + message.via_channel + " by " + message.from_user + ". Would you like to join the channel?"
+                pubsub.publish(username,
+                                Message(message.from_user, username, content, MessageType.DIRECT))
 
-# Create a queue to hold the tuples
+pubsub.overwatch(overwatch_callback)
+
+# Remove watch-related background tasks
 memory_builder_queue = queue.Queue()
 indexing_queue = queue.Queue()
-
-# Function to watch the queue and process items
-def watch_memory_builder_queue():
-    while True:
-        try:
-            # Wait for 2 minutes
-            time.sleep(30)
-            # Check if there is an item in the queue
-            if not memory_builder_queue.empty():
-                # Get the item from the queue
-                username, persona, conversation_id = memory_builder_queue.get()
-                # Process the item
-                memory_builder(username, persona, conversation_id)
-        except Exception as e:
-            print(f"Error in watch_queue: {e}")
-            tb = traceback.format_exc()
-            print(tb)
-
-# Start the background thread
-threading.Thread(target=watch_memory_builder_queue, daemon=True).start()
 
 def watch_indexing_queue():
     while True:
@@ -241,6 +125,65 @@ def watch_indexing_queue():
             print(traceback.format_exc())
 
 threading.Thread(target=watch_indexing_queue, daemon=True).start()
+
+
+def watch_memory_builder_queue():
+    while True:
+        try:
+            # Wait for 2 minutes
+            time.sleep(60*2)
+            # Check if there is an item in the queue
+            if not memory_builder_queue.empty():
+                # Get the item from the queue
+                username, persona, conversation_id = memory_builder_queue.get()
+                # Process the item
+                memory_builder(username, persona, conversation_id)
+        except Exception as e:
+            print(f"Error in watch_queue: {e}")
+            tb = traceback.format_exc()
+            print(tb)
+# Start the background thread
+threading.Thread(target=watch_memory_builder_queue, daemon=True).start()
+
+# Method to add to the queue
+def add_to_memory_builder_queue(username, persona, conversation_id):
+    # Clear all existing items from the cleanup queue
+    # Remove existing items for this persona from the cleanup queue
+    items = []
+    while not memory_builder_queue.empty():
+        try:
+            item = memory_builder_queue.get_nowait()
+            if item[0] != persona:  # Keep items for other personas
+                items.append(item)
+        except queue.Empty:
+            break
+    # Put back items we want to keep
+    for item in items:
+        memory_builder_queue.put(item)
+
+    memory_builder_queue.put((username, persona, conversation_id))
+
+def memory_template(memories: str) -> str:
+    return f"""
+Previous notes:
+
+START OF PREVIOUS NOTES
+{memories}
+END OF PREVIOUS NOTES
+
+Instructions:
+
+    - Create detailed notes about the conversation and combine them with the previous notes above.
+    - Make sure to keep a profile of the user and their interests.
+    - Make sure to keep a profile of your own knowledge, particularily any information about the user.
+    - Make sure to keep a profile of your self and you relationship with the user.
+    - These notes are written from your own perspective and about the user.
+    - Remove duplicate information.
+    - Make sure to include any files that are relevant to the conversation.
+    - Use a format that is easy for you to use for reference later.
+    - The reply should be no longer than 500 words.
+    - Don't include any other text than the notes.
+"""
 
 def memory_builder(username, persona, convo_id):
     print("Running memory builder")
@@ -258,8 +201,10 @@ def memory_builder(username, persona, convo_id):
 
     chatapp = ChatApp(config_manager, persona)
     chatapp.history = history
+
     chatapp.set_system_content(f"You are {persona}. You are a rigorous and detailed note taker.\n\n" + prompt)
-    result = ChatApp.unstream(chatapp.stream("Generate new notes based on the conversation and the previous notes.", use_tools=False))
+    result = ChatApp.unstream(chatapp.stream("Generate new notes based on the conversation and the previous notes. Response should be no longer than 500 words and be in a human readable format.", use_tools=False))
+
     notesManager.put_note(f"memories/memories.txt", result)
  
 def run_indexer(username, persona, query, full_response): 
@@ -308,6 +253,46 @@ def voice_generator():
         except Exception as e:
             print(f"Error in voice_generator: {e}")
 threading.Thread(target=voice_generator, daemon=True).start()
+
+def token_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        
+        # Check if token is in the Authorization header
+        auth_header = request.headers.get('Authorization')
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+        
+        # If no token in header, check if it's in the request args
+        if not token:
+            token = request.args.get('token')
+            
+        if not token:
+            return jsonify({"error": "Token is missing"}), 401
+            
+        # Get username from request args or headers
+        username = request.args.get('username') or request.headers.get('X-Username')
+        if not username:
+            return jsonify({"error": "Username is required for token validation"}), 401
+            
+        # Validate the token
+        auth_manager = AuthManager(LocalConfigManager("auth"))
+        if not auth_manager.verify_token(username, token):
+            return jsonify({"error": "Invalid or expired token"}), 401
+            
+        # Set username on request state
+        g.username = username
+        g.token = token
+        g.user_config = auth_manager.get_user_config(username, token)
+        
+        # Set LocalConfigManager on request state
+        g.config_manager = LocalConfigManager(username)
+            
+        # Token is valid, proceed with the request
+        return f(*args, **kwargs)
+    
+    return decorated
 
 @app.route('/')
 def serve_index():
@@ -363,31 +348,6 @@ def filter_urls(text: str) -> str:
     url_pattern = r'https?://\S+'
     return re.sub(url_pattern, 'URL', text)
 
-def count_tokens(text: str) -> int:
-    """Count the number of tokens in a text string."""
-    if not text:
-        return 0
-    encoding = tiktoken.encoding_for_model("gpt-3.5-turbo")
-    return len(encoding.encode(text))
-
-def check_for_urls(message: str) -> tuple[bool, str]:
-    """
-    Check if a message contains any URLs and return the first URL found.
-    
-    Args:
-        message (str): The message to check for URLs
-        
-    Returns:
-        tuple[bool, str]: A tuple containing (has_url, extracted_url)
-            - has_url (bool): True if a URL was found, False otherwise
-            - extracted_url (str): The first URL found, or None if no URL was found
-    """
-    url_pattern = r'https?://\S+'
-    url_matches = re.findall(url_pattern, message)
-    has_url = len(url_matches) > 0
-    extracted_url = url_matches[0] if has_url else None
-    return has_url, extracted_url
-
 def context_template(message: str, context: str, extracted_url: str) -> str:
     now = datetime.now()
     today = now.strftime("%B %d, %Y")
@@ -424,61 +384,92 @@ def system_message(message: str) -> str:
     json_message = json.dumps({'type': 'system', 'content': message})
     return f"data: {json_message}\n\n"
 
-def memory_template(memories: str) -> str:
-    return f"""
-Previous notes:
-
-START OF PREVIOUS NOTES
-{memories}
-END OF PREVIOUS NOTES
-
-Instructions:
-Create detailed notes about the conversation and combine them with the previous memories.
-Make sure to keep a profile of the user and their interests.
-Make sure to keep a profile of your own knowledge, particularily any information about the user.
-Make sure to keep a profile of your self and you relationship with the user.
-These notes are written from your own perspective and about the user.
-Remove duplicate information.
-Include a list of instructions for yourself to follow to better taylor your responses going forward.
-Use a format that is easy for you to use for reference later.
-The reply should be no longer than 1000 words.
-Don't include any other text than the notes.
-Don't use NotesAction.put_note
-"""
     
-def search_past_logs(config_manager, persona, query, previous_reply=None):
-    if previous_reply:
-        previous_reply = f"Previous Reply: {previous_reply}"
-    else:
-        previous_reply = ""
-    script = f"""
-Return five index terms that can be used to search past conversations relevant to the following query, return the terms as a simple commas seperated list, return only the terms and nothing else
-
-{previous_reply}
-
-
-The query is: {query}
-
-""" 
-    terms = ask_agent("summer", script)
-    print("Terms: " + terms)
-    logManager = config_manager.get_log_manager()
-    logs = []
-    for term in terms.split(","):
-        for log in logManager.search_log_item(persona, term.strip()):
-            if len(log) > 256:
-                log = log[:255]
-            logs.append(log)
-    print("Found " + str(len(logs)) + " logs")
-    log_items = LogCollection.fromLogLines(logs)
-    return log_items.generate_report()
-
 def print_convo(convo):
     print("CONVO_START")
     for c in convo:
         message = c["content"][0:255]
         print(f"{c['role']}: {message}")
     print("CONVO_END\n\n")
+
+
+@app.route('/subscribe', methods=['GET'])
+@token_required
+def subscribe():
+    pubsub = PubSub.get_instance()
+    username = g.username
+    subscription_service = SubscriptionService()
+    subscription_service.subscribe("@"+username, "#system")
+    def generate_stream():    
+        try:
+            while True:
+                for item in pubsub.watch("@"+username):
+                    if not item:
+                        continue
+                    if item.type == MessageType.HANGUP:
+                        continue
+                    if item.from_user == "@"+username:
+                        continue
+                    if item.type == MessageType.SYSTEM:
+                        yield "data: " + json.dumps(item.to_dict()) + "\n\n"
+                    else:
+                        yield "data: " + json.dumps(item.to_dict()) + "\n\n"
+                        yield f"data: {json.dumps({'conversation_id': '', 'type': 'break', 'content': ''})}\n\n"
+                        yield f"data: {json.dumps({'conversation_id': '', 'type': 'end', 'content': ''})}\n\n"
+        except Exception as e:
+            print(f"Error in subscribe: {e}")
+            print(traceback.format_exc())
+            yield f"data: {json.dumps({'conversation_id': '', 'type': 'end', 'content': 'END OF RESPONSE'})}\n\n"
+        finally:
+            print("Disconnecting from channels")
+    return app.response_class(generate_stream(), mimetype='text/event-stream')
+
+@app.route('/publish', methods=['POST'])
+@token_required
+def publish():
+    data = request.get_json()
+    username = g.username
+    user_config = g.user_config
+    query = data.get('query', '')
+    channel = data.get('channel', '')
+    if not channel:
+        return jsonify({"error": "Channel is required"}), 400
+    
+    sender_channel = "@" + username
+    subscription_service = SubscriptionService()
+
+    if channel.startswith('@'):
+        is_direct = True
+        persona = channel[1:]
+        personas = GlobalConfig().get_persona_choices(user_config.get("groups", ["default"]))
+        if persona not in personas:
+            return jsonify({"error": "Persona not found"}), 400
+        receiver_channel = "@" + persona
+        conversation_channel = get_direct_channel_name(sender_channel, receiver_channel)
+        subscription_service.subscribe(sender_channel, conversation_channel)
+        subscription_service.subscribe(receiver_channel, conversation_channel)
+    else:
+        is_direct = False
+        users_channels = subscription_service.get_user_subscriptions("@"+username)
+        if channel not in users_channels:
+            return jsonify({"error": "Channel not found"}), 400
+        conversation_channel = channel
+        receiver_channel = channel
+
+    if data.get('context',''):
+        query = context_template(query, data.get('context', ''), 'User provided context')
+        
+    message = Message(sender_channel, conversation_channel, query)
+    print("Publishing message " + str(message))
+    if is_direct:
+        message.set_to_direct()
+    else:
+        message.set_to_channel()
+    
+    pubsub.publish(conversation_channel, message)
+
+    return jsonify({"status": "success"})
+
 
 
 @app.route('/query', methods=['POST'])
@@ -501,7 +492,6 @@ def query():
             yield system_message("Persona not found")
             yield f"data: {json.dumps({'type': 'end', 'content': 'END OF RESPONSE'})}\n\n"
             return
-        use_broker = config.get_use_broker(persona)
         
         # Get conversation history from conversation store
         conversation_id = data.get('conversation_id')
@@ -517,7 +507,7 @@ def query():
             memories = "These are your memories from previous conversations: \n\n" + memories
         else:
             memories = ""
-
+        
         full_response = ""
         chatapp = ChatApp(config_manager, persona, conversation_id)
         voice_buffer = ""
@@ -532,7 +522,7 @@ def query():
         
         send_buffer = ""
         last_send_time = time.time()
-        for type, content in chatapp.stream(data.get("query",""), wait_timeout=30):
+        for type, content in chatapp.stream(data.get("query",""), wait_timeout=30, require_reply=True):
             if type == "break":
                 if send_buffer:
                     yield f"data: {json.dumps({'content': send_buffer})}\n\n"
@@ -619,18 +609,28 @@ def serve_voice(voice_filename):
 @token_required
 def get_personas():
     config = GlobalConfig()
+    username = g.username
     user_config = g.user_config
     if user_config:
         groups = user_config.get("groups", ["default"])
     else:
         groups = ["default"]
-    personas = config.get_persona_choices(groups)
-    return jsonify(personas)
 
+    personas = config.get_persona_choices(groups)
+    
+    config = GlobalConfig()
+    subscription_service = SubscriptionService()
+    channels = list(subscription_service.get_user_subscriptions("@"+username))
+    channels = [c for c in channels if not "->" in c]
+    
+    out = {"personas": personas, "channels": channels}
+    return jsonify(out)
+
+    
 @app.route('/avatars/<requested_avatar>')
 def serve_avatar(requested_avatar):
     img_dir = os.path.join(WEB_DIR, 'img')
-    default_avatar = 'avatar.png'
+    default_avatar = 'avatar.svg'
     # Check if the requested avatar exists
     if os.path.exists(os.path.join(img_dir, requested_avatar)):
         return send_from_directory(img_dir, requested_avatar)
@@ -647,7 +647,7 @@ def login():
     username = data.get('username')
     password = data.get('password')
     
-    auth_manager = AuthManager()
+    auth_manager = AuthManager(LocalConfigManager("auth"))
     token = auth_manager.authenticate(username, password)
     
     if token:
@@ -660,22 +660,109 @@ def login():
 def protected_route():
     return jsonify({"message": "This is a protected route. You have valid authentication."}), 200
 
-@app.route('/watch', methods=['GET'])
+@app.route('/conversation_history', methods=['POST'])
 @token_required
-def watch_conversation():
-    conversation_id = request.args.get('conversation_id')
-    persona = request.args.get('persona')
-    if not conversation_id:
-        return jsonify({"error": "Conversation ID is required"}), 400
-    if not persona:
-        return jsonify({"error": "Persona is required"}), 400
+def get_conversation_history():
+    pubsub = PubSub.get_instance()
+    data = request.get_json()
+    channel = data.get('channel')
+    
+    if not channel:
+        return jsonify({"error": "Channel is required"}), 400
+   
+    if channel.startswith("@"):
+        names = ['@'+g.username, channel]
+        names.sort()
+        channel = "#"+names[0]+"->"+names[1]
+ 
+    # Get messages from PubSub for this channel
+    messages = pubsub.get_channel_messages(channel)
+    
+    # Convert PubSub messages to chat history format
+    history = []
+    for msg in messages:
+        history.append(msg.to_dict())
 
-    config_manager = LocalConfigManager(g.username, persona)
-    chatapp = ChatApp(config_manager, persona, conversation_id)
-    watch_status = chatapp.get_watch_status()
-    return jsonify(watch_status)
+    return jsonify({"history": history, "channel": channel})
 
+@app.route('/reset', methods=['POST'])
+@token_required
+def reset_conversation():
+    data = request.get_json()
+    channel = data.get('channel')
+    
+    if not channel:
+        return jsonify({"error": "Channel is required"}), 400
 
+    pubsub = PubSub.get_instance()
+    username = g.username
+
+    # Handle direct message channels
+    if channel.startswith('@'):
+        names = ['@' + username, channel]
+        names.sort()
+        channel = '#' + names[0] + '->' + names[1]
+
+    # Clear the channel history
+    pubsub.clear_channel_messages(channel)
+    
+    return jsonify({
+        "message": "Channel history cleared successfully",
+        "channel": channel
+    })
+
+@app.route('/channel_context', methods=['POST'])
+@token_required
+def channel_context():
+    data = request.get_json()
+    channel = data.get('channel')
+    text = data.get('text')
+   
+    if not channel or not text:
+        return jsonify({'error': 'Both channel and text are required.'}), 400
+    
+    if channel.startswith("@"):
+        channel = ChannelNameGuide.get_direct_channel_name("@"+g.username, channel)
+
+    try:
+        manager = ChannelContextManager()
+        manager.add_context(channel, ContextType.NOTE, {'text': text, 'added_by': g.username, 'timestamp': datetime.now().isoformat()})
+        return jsonify({'status': 'success', 'message': f'Context added to channel {channel}.'})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/get_channel_context', methods=['GET'])
+@token_required
+def get_channel_context():
+    channel = request.args.get('channel')
+    if not channel:
+        return jsonify({'error': 'Channel parameter is required.'}), 400
+    
+    if channel.startswith("@"):
+        channel = ChannelNameGuide.get_direct_channel_name("@"+g.username, channel)
+    
+    try:
+        manager = ChannelContextManager()
+        context = manager.get_context(channel)
+        if context is None:
+            return jsonify({'error': f'No context found for channel {channel}.'}), 404
+        out = []
+        for id, context_type, context in context:
+            out.append({
+                'id': id,
+                'context_type': context_type.value,
+                'context': context
+            })
+        return jsonify({'channel': channel, 'context': out})
+    except Exception as e:
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=8001) 
+    parser = argparse.ArgumentParser(description='Leah Server')
+    parser.add_argument('--listen', action='store_true', help='Listen on 0.0.0.0 (all interfaces)')
+    args = parser.parse_args()
+    
+    host = '0.0.0.0' if args.listen else '127.0.0.1'
+    app.run(host=host, port=8001) 

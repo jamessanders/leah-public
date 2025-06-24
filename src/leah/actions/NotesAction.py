@@ -2,9 +2,12 @@ from datetime import datetime
 from typing import Any, Dict
 import uuid
 from leah.actions.IActions import IAction
-from leah.llm.ChatApp import ChatApp
+from leah.llm.LlmConnector import LlmConnector
+from leah.utils.Message import Message
+from leah.utils.PubSub import PubSub
+
 class NotesAction(IAction): 
-    def __init__(self, config_manager, persona, query, chat_app: ChatApp):
+    def __init__(self, config_manager, persona, query, chat_app: Any):
         self.config_manager = config_manager
         self.persona = persona
         self.query = query
@@ -14,37 +17,36 @@ class NotesAction(IAction):
         return [
             (self.put_note, 
              "put_note", 
-             "Add a note in your notes files, these can be used to answer the user's query. Note names should be in the format of 'note_name.txt'", 
+             "Add a note in your notes files, these can be used to answer the user's query. Note names should be in the format of 'note_name.note'", 
              {"note_name": "<the name of the note to add>", "note_content": "<the content of the note to add>"}),
             (self.put_note, 
              "update_note", 
-             "Update a note in your notes files, these can be used to answer the user's query. Note names should be in the format of 'note_name.txt'", 
+             "Update a note in your notes files, these can be used to answer the user's query. Note names should be in the format of 'note_name.note'", 
              {"note_name": "<the name of the note to add>", "note_content": "<the content of the note to add>"}),
             (self.get_note,
               "get_note", 
-              "Get a note from your notes, these can be used to answer the user's query. Note names should be in the format of 'note_name.txt'", 
+              "Get a note from your notes, these can be used to answer the user's query. Note names should be in the format of 'note_name.note'", 
               {"note_name": "<the name of the note to get>"}),
             (self.get_note,
               "reference_note", 
-              "Reference a note, these notes can be used to answer the user's query. Note names should be in the format of 'note_name.txt'", 
+              "Reference a note, these notes can be used to answer the user's query. Note names should be in the format of 'note_name.note'", 
               {"note_name": "<the name of the note to get>"}),
             (self.store_reminder, "store_reminder", "Store a reminder in your notes, this will be used to keep track of the users reminders", {"reminder": "<the reminder to store>", "when": "<when the reminder is for>"}),
             (self.get_reminders, "get_reminders", "Get all the reminders you have, this will be used to answer the user's queries about their reminders", {}),
             (self.remove_reminder, "remove_reminder", "Remove a reminder", {"id": "<the id of the reminder to remove>"}),
-            (self.schedule_task, 
-             "schedule_task", 
-             "Schedule a task for yourself for later, this can be used to notify the user of something at a later date, the date must be in the format %Y-%m-%d_%H-%M-%S.  Consider using this along with reminders so you can notfy the user at specific times. Always create task to remind the user of something later.", 
-             {"when": "when the task should be scheduled for, must be in the format %Y-%m-%d_%H-%M-%S.", "task":"what the task is, for example notify user of a meeting."})
+            (self.search_notes,
+             "search_notes",
+             "Search through note names for specific terms (comma-separated)",
+             {"terms": "<comma-separated list of terms to search for in note names, e.g. 'meeting,todo,important'>"})
         ]
 
     def context_template(self, query: str, context: str, note_name: str) -> str:
         return f"""
-Here is the contents of the note {note_name}:
+I have looked up the note {note_name} and found the following information:
 
 {context}
 
-Source: {note_name} 
-
+----
 """
     def schedule_task(self, arguments: Dict[str, Any]):
         config_manager = self.config_manager
@@ -102,7 +104,8 @@ Source: {note_name}
         else:
             yield ("end", "Reminder not found")
 
-    def put_note(self, arguments): 
+    def put_note(self, arguments):
+        from leah.llm.ChatApp import ChatApp
         name = arguments.get("note_name","")
         content = arguments.get("note_content","")
         if not name or not content:
@@ -114,14 +117,21 @@ Source: {note_name}
         
         prev_contents = notes_manager.get_note(name)
         if not prev_contents:
-            prev_contents = ""
-            notes_manager.put_note(name,content)
-            yield ("end", f"")
+            notes_manager.put_note(name, "Note added by " + self.persona + " at " + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n\n" + content + "\n----\n")
+            pubsub = PubSub.get_instance()
+            if self.chat_app.channel_id:
+                pubsub.publish(self.chat_app.channel_id, Message("@" + self.persona, self.chat_app.channel_id, f"Created note: {name}"))
+            yield ("result", f"I created a new note names {name}. ")
         else:
-            new_query = f"Here are the contents of a document: \n{prev_contents}\n\nRewrite the contents to include the following information, respond with only the updated document and no other text: {content}"
-            result = ChatApp.unstream(self.chat_app.stream(new_query, use_tools=False))
-            notes_manager.put_note(name, result)
-            yield ("end", f"")
+            chat_app = LlmConnector(self.config_manager, self.persona)
+            new_contents = chat_app.query(f"Here are the contents of the note {name}: {prev_contents}\n\nPlease update the note with the following content, skip prose: {content}")
+            if new_contents:
+                content = new_contents
+            notes_manager.put_note(name, prev_contents + "\n\nNote updated by " + self.persona + " at " + datetime.now().strftime("%Y-%m-%d %H:%M:%S") + "\n\n" + content + "\n----\n")
+            pubsub = PubSub.get_instance()
+            if self.chat_app.channel_id:
+                pubsub.publish(self.chat_app.channel_id, Message("@" + self.persona, self.chat_app.channel_id, f"Updated note: {name}"))
+            yield ("result", f"I have updated the note {name}. ")
 
     def get_note(self, arguments):
         yield ("system", "Getting note: " + arguments.get("note_name",""))
@@ -133,12 +143,24 @@ Source: {note_name}
         yield ("system", "Listing notes")
         config_manager = self.config_manager
         notes_manager = config_manager.get_notes_manager()
-        yield ("result", "Here are all the notes you have: " + str(", ".join(notes_manager.get_all_notes())) + " answer the query based on this information, the query is: " + self.query)
+        yield ("result", "I have listed all the notes I have and the results are: " + str(", ".join(notes_manager.get_all_notes())))
 
-    def additional_notes(self):
+    def search_notes(self, arguments):
+        yield ("system", "Searching notes for terms: " + str(arguments.get("terms", "")))
         config_manager = self.config_manager
         notes_manager = config_manager.get_notes_manager()
-        all_notes = notes_manager.get_notes_by_size(100)
-        if all_notes:
-            return "Here are some current notes you have but you can also create new ones: " + str(", ".join(all_notes))
-        return ""
+        terms_string = arguments.get("terms", "")
+        search_terms = [term.strip() for term in terms_string.split(",") if term.strip()]
+        all_notes = notes_manager.get_all_notes()
+        
+        matching_notes = []
+        for note in all_notes:
+            if any(term.lower() in note.lower() for term in search_terms):
+                matching_notes.append(note)
+        
+        if not matching_notes:
+            yield ("result", "No notes found matching the search terms: " + str(search_terms))
+        else:
+            yield ("result", "Found the following matching notes: " + ", ".join(matching_notes))
+
+    

@@ -7,10 +7,10 @@ from leah.actions.IActions import IAction
 from typing import List, Dict, Any
 from leah.config.LocalConfigManager import LocalConfigManager
 from openai import OpenAI
-from leah.llm.ChatApp import ChatApp
+
 class ImageGen(IAction):
     modes = ["openai", "stable_diffusion"]
-    def __init__(self, config_manager: LocalConfigManager, persona: str, query: str, chat_app: ChatApp):
+    def __init__(self, config_manager: LocalConfigManager, persona: str, query: str, chat_app: Any):
         self.config_manager = config_manager
         self.persona = persona
         self.query = query

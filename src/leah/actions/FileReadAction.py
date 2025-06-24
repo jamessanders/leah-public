@@ -1,17 +1,16 @@
 from datetime import datetime
+import json
 from typing import Any, Dict, List
-from leah.llm.ChatApp import ChatApp
 from leah.actions.IActions import IAction
-from leah.utils.FileManager import FileManager
-from leah.utils.FilesSandbox import FilesSandbox
+from leah.utils.GlobalFileManager import GlobalFileManager
 
 class FileReadAction(IAction): 
-    def __init__(self, config_manager, persona, query, chat_app: ChatApp):
+    def __init__(self, config_manager, persona, query, chat_app: Any):
         self.config_manager = config_manager
         self.persona = persona
         self.query = query
         self.chat_app = chat_app
-        self.file_manager = FilesSandbox(config_manager.get_file_manager(), "sandbox")
+        self.file_manager = GlobalFileManager(config_manager, '/', config_manager.get_persona_path(self.persona))
 
     def getTools(self):
         return [
@@ -23,11 +22,35 @@ class FileReadAction(IAction):
             (self.list_files,
              "list_files",
              "List all files in the files directory and its subdirectories.",
-             {}),
-            (self.list_files_by_size,
-             "list_files_by_size",
-             "List files ordered by size from largest to smallest, optionally limited to a maximum number.",
-             {"max_files": "<optional maximum number of files to list>"})
+             {"file_path": "<the path of the directory to list files from>"}),
+            (self.get_file_info,
+             "get_file_info",
+             "Retrieve metadata about a specific file, including size, last modified, and created time.",
+             {"file_path": "<the path of the file to get info about>"}),
+            (self.search_files,
+             "search_files",
+             "Search for files and directories containing any of the specified search terms.",
+             {
+                 "search_terms": "<comma separated list of strings to search for in file/directory names>",
+                 "path": "<optional: starting directory path for the search>",
+                 "case_sensitive": "<optional: whether the search should be case sensitive (true/false)>"
+             }),
+            (self.content_search,
+             "content_search",
+             "Search for text within all files in a directory (like grep).",
+             {
+                 "search_term": "<text to search for within files>",
+                 "path": "<optional: starting directory path for the search>",
+                 "case_sensitive": "<optional: whether the search should be case sensitive (true/false)>"
+             }),
+             (self.content_search,
+             "grep",
+             "Search for text within all files in a directory (like grep).",
+             {
+                 "search_term": "<text to search for within files>",
+                 "path": "<optional: starting directory path for the search>",
+                 "case_sensitive": "<optional: whether the search should be case sensitive (true/false)>"
+             }),
         ]
 
     def context_template(self, query: str, context: str, file_path: str) -> str:
@@ -50,6 +73,10 @@ Source: {file_path}
             yield ("end", "File path is required")
             return
         
+        if file_path.endswith(".note"):
+            yield ("result", "This is a note, please use the notes action to read it.")
+            return
+
         file_manager = self.file_manager
         
         yield ("system", "Reading file: " + file_path)
@@ -64,26 +91,85 @@ Source: {file_path}
             yield ("result", self.context_template(self.query, f"Error reading file: {str(e)}", file_path))
 
     def list_files(self, arguments: Dict[str, Any]):
-        yield ("system", "Listing files")
         file_manager = self.file_manager
-        files = file_manager.get_all_files()
-        yield ("result", "Here are all the files you have: " + str(", ".join(files)) + "\nAnswer the query based on this information, the query is: " + self.query)
+        file_path = arguments.get("file_path", "")
+        yield ("system", "Listing files under " + file_path)
+        files = file_manager.list_files_recusive(file_path)
+        yield ("result", 
+               "I listed the files in " + file_path + " and here are the results: " + str("\n".join(files)))
 
-    def list_files_by_size(self, arguments: Dict[str, Any]):
-        yield ("system", "Listing files by size")
+    def get_file_info(self, arguments: Dict[str, Any]):
+        file_path = arguments.get("file_path", "")
+        if not file_path:
+            yield ("end", "File path is required")
+            return
         file_manager = self.file_manager
-        max_files = arguments.get("max_files", None)
-        if max_files is not None:
-            try:
-                max_files = int(max_files)
-            except ValueError:
-                max_files = None
-        files = file_manager.get_files_by_size(max_files)
-        yield ("result", "Here are your files ordered by size: " + str(", ".join(files)) + "\nAnswer the query based on this information, the query is: " + self.query)
+        yield ("system", "Getting file info: " + file_path)
+        try:
+            info = file_manager.get_file_info(file_path)
+            if info is None:
+                yield ("result", f"File {file_path} not found")
+            else:
+                info = json.dumps(info, indent=4)
+                yield ("result", f"File info for {file_path}: {info}")
+        except Exception as e:
+            yield ("result", f"Error getting file info: {str(e)}")
+
+    def search_files(self, arguments: Dict[str, Any]):
+        """
+        Search for files and directories containing specified search terms.
+        """
+        search_terms_str = arguments.get("search_terms", "")
+        path = arguments.get("path", "")
+        case_sensitive = arguments.get("case_sensitive", False)
+        if isinstance(case_sensitive, str):
+            case_sensitive = case_sensitive.lower() == "true"
+
+        if not search_terms_str:
+            yield ("end", "At least one search term is required")
+            return
+
+        # Split comma-separated terms and strip whitespace
+        search_terms = [term.strip() for term in search_terms_str.split(",") if term.strip()]
+
+        if not search_terms:
+            yield ("end", "At least one valid search term is required")
+            return
+
+        yield ("system", f"Searching for files containing any of these terms: {', '.join(search_terms)} in {path} with case sensitivity: {case_sensitive}")
+        
+        try:
+            matches = self.file_manager.search_files(search_terms, path, case_sensitive)
+            if matches:
+                yield ("result", f"Found {len(matches)} matching files/directories:\n" + "\n".join(matches))
+            else:
+                yield ("result", "No files or directories found matching the search terms.")
+        except Exception as e:
+            yield ("result", f"Error searching files: {str(e)}")
+
+    def content_search(self, arguments: Dict[str, Any]):
+        """
+        Search for text content within files.
+        """
+        search_term = arguments.get("search_term", "")
+        path = arguments.get("path", "")
+        case_sensitive = arguments.get("case_sensitive", "false").lower() == "true"
+
+        if not search_term:
+            yield ("end", "Search term is required")
+            return
+
+        yield ("system", f"Searching for files containing the text: {search_term} in {path} with case sensitivity: {case_sensitive}")
+        
+        try:
+            matches = self.file_manager.content_search(search_term, path, case_sensitive)
+            if matches:
+                yield ("result", f"Found matches in files:\n" + "\n".join(matches))
+            else:
+                yield ("result", "No files found containing the search term.")
+        except Exception as e:
+            yield ("result", f"Error searching file contents: {str(e)}")
 
     def additional_notes(self):
-        file_manager = self.file_manager
-        all_files = file_manager.get_all_files()
-        if all_files:
-            return "Here are some current files you have that you can read: " + str(", ".join(all_files))
-        return "" 
+        return "You can read any file on the file system.  You can get a list of files in any directory on the file system.  Files are generally written in " + self.config_manager.get_sandbox_directory_path() + "."
+        
