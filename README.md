@@ -2,8 +2,6 @@
 
 A flexible framework for creating AI assistants with different personalities and personas, featuring web-based, command line and voice interfaces.
 
-<img width="1726" alt="Screenshot 2025-06-24 at 4 25 01 PM" src="https://github.com/user-attachments/assets/9a0a6559-a6c9-4d46-9c36-a7a361f89954" />
-
 ## Prerequisites
 
 - Python 3.8 or higher

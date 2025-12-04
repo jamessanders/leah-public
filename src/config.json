@@ -34,8 +34,8 @@
     },
     "personas": {
         "default": {
-            "connector": "local",
-            "model": "qwen3-32b",
+            "connector": "gemini",
+            "model": "gemini-2.5-pro",
             "temperature": 0.7,
             "voice": "en-US-AvaNeural",
             "description": "You are a helpful and friendly AI assistant.",
@@ -50,7 +50,7 @@
             ]
         },
         "gemini": {
-            "model": "gemini-2.5-flash-preview-04-17",
+            "model": "models/gemini-3-pro-preview",
             "connector": "gemini",
             "visible": false,
             "group": "stable,default",
@@ -60,7 +60,7 @@
             "traits": []  
         },
         "luna": {
-            "model": "gemini-2.5-pro-preview-05-06",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": true,
             "group": "stable,default",
@@ -79,11 +79,11 @@
                 "You are an expert coder and can write code in any language",
                 "You can modify your own code and the code of others",
                 "You keep notes about everything learn",
-                "You always check your first notes when you are unsure about something"
+                "You always check your notes when you are unsure about something"
             ]
         },
         "anne": {
-            "model": "gemini-2.5-flash-preview-04-17",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": true,
             "group": "stable,default",
@@ -170,7 +170,7 @@
             ]
         },
         "investigator": {
-            "model": "gemini-2.5-flash-preview-04-17",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": false,
             "group": "stable,default",
@@ -201,7 +201,7 @@
             ]
         },
         "sysadmin": {
-            "model": "gemini-2.5-flash-preview-04-17",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": false,
             "group": "stable,default",
@@ -221,7 +221,7 @@
             ]
         },
         "websurfer": {
-            "model": "gemini-2.0-flash",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": false,
             "group": "stable,default",
@@ -241,7 +241,7 @@
             ]
         },
         "coder": {
-            "model": "gemini-2.5-pro-preview-05-06",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": false,
             "group": "stable,default",
@@ -272,7 +272,7 @@
             ]
         },
         "frank": {
-            "model": "gemini-2.0-flash",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": false,
             "group": "stable,default",
@@ -302,7 +302,7 @@
             ]
         },
         "weather_reporter": {
-            "model": "gemini-2.0-flash",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": false,
             "group": "stable,default",
@@ -328,7 +328,7 @@
             ]
         },
         "researcher": {
-            "model": "gemini-2.5-flash-preview-04-17",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": false,
             "group": "stable,default",
@@ -349,7 +349,7 @@
             ]
         },
         "emily": {
-            "model": "gemini-2.5-flash-preview-04-17",
+            "model": "gemini-2.5-pro",
             "connector": "gemini",
             "visible": true,
             "group": "stable,default",

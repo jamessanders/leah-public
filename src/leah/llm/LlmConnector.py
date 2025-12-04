@@ -62,8 +62,7 @@ class LlmConnector:
                 model=model,
                 temperature=temperature,
                 openai_api_key=api_key,
-                base_url=base_url,
-                max_output_tokens=self.max_output_tokens
+                base_url=base_url
             )
         else:  # local connector for Ollama/LMStudio
             self.llm = ChatOllama(
